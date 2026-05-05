@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
-import { getPrimaryRole } from '@/lib/auth/permissions';
+import { getPrimaryRole, canManageCompany } from '@/lib/auth/permissions';
 import { StatusBadge } from '@/components/ui/badge';
 import { Building, Users, Calendar, Globe } from 'lucide-react';
 import { formatDate } from '@/lib/utils';
@@ -17,14 +17,27 @@ export default async function CompaniesPage() {
 
   const { data: rolesData } = await supabase.from('user_roles').select('*').eq('user_id', user.id).eq('is_active', true);
   const roles: UserRoleAssignment[] = rolesData ?? [];
-  if (getPrimaryRole(roles) !== 'super_admin') redirect('/dashboard');
+  if (!canManageCompany(roles)) redirect('/dashboard');
+
+  const primaryRole = getPrimaryRole(roles);
 
   const tenant = await getTenantCompany();
   if (tenant === 'not_found') redirect('/tenant-not-found');
 
-  // On subdomain: show only that company. On main domain: show all.
+  // Determine scope:
+  // - platform_super_admin: see all companies
+  // - tenant_super_admin: see only companies in their tenant
+  // - super_admin on subdomain: see only that company
+  // - super_admin on main domain: see all companies
   let companiesQuery = supabase.from('companies').select('*').order('name');
-  if (tenant) companiesQuery = companiesQuery.eq('id', tenant.id);
+  if (tenant) {
+    companiesQuery = companiesQuery.eq('id', tenant.id);
+  } else if (primaryRole === 'tenant_super_admin') {
+    const tenantRole = roles.find(r => r.role === 'tenant_super_admin' && r.tenant_id);
+    if (tenantRole?.tenant_id) {
+      companiesQuery = companiesQuery.eq('tenant_id', tenantRole.tenant_id);
+    }
+  }
 
   const { data: companies } = await companiesQuery;
 
@@ -41,7 +54,7 @@ export default async function CompaniesPage() {
                 {tenant ? `Viewing: ${tenant.name}` : 'Manage all organizations in the system'}
               </p>
             </div>
-            {!tenant && <CompanyActions />}
+            {!tenant && primaryRole !== 'tenant_super_admin' && <CompanyActions />}
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="bg-white/10 backdrop-blur-sm border border-white/20 rounded-2xl p-4">

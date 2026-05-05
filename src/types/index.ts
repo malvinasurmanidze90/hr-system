@@ -1,4 +1,12 @@
-export type UserRole = 'super_admin' | 'ceo' | 'bu_head' | 'manager' | 'hr_admin' | 'employee';
+export type UserRole =
+  | 'platform_super_admin'
+  | 'tenant_super_admin'
+  | 'super_admin'
+  | 'ceo'
+  | 'bu_head'
+  | 'manager'
+  | 'hr_admin'
+  | 'employee';
 export type ContentStatus = 'draft' | 'published' | 'archived';
 export type EnrollmentStatus = 'not_started' | 'in_progress' | 'completed' | 'overdue';
 export type OnboardingStatus = 'pending' | 'in_progress' | 'completed' | 'cancelled';
@@ -46,12 +54,23 @@ export interface Profile {
   updated_at: string;
 }
 
+export interface Tenant {
+  id: string;
+  name: string;
+  slug: string;
+  domain?: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface UserRoleAssignment {
   id: string;
   user_id: string;
   role: UserRole;
   company_id?: string;
   business_unit_id?: string;
+  tenant_id?: string;
   assigned_by?: string;
   assigned_at: string;
   expires_at?: string;

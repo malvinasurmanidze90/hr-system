@@ -3,7 +3,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
   LayoutDashboard, BookOpen, GraduationCap, UserCheck, Users,
-  Building2, Building, BarChart3, Sparkles, LogOut, ChevronLeft, ChevronRight, Bell, Tag,
+  Building2, Building, BarChart3, Sparkles, LogOut, ChevronLeft, ChevronRight, Bell, Tag, Layers,
 } from 'lucide-react';
 import { cn, getInitials } from '@/lib/utils';
 import { ROLE_LABELS, getNavItems } from '@/lib/auth/permissions';
@@ -14,7 +14,7 @@ import { useRouter } from 'next/navigation';
 
 const ICON_MAP: Record<string, React.ElementType> = {
   LayoutDashboard, BookOpen, GraduationCap, UserCheck,
-  Users, Building2, Building, BarChart3, Sparkles, Tag,
+  Users, Building2, Building, BarChart3, Sparkles, Tag, Layers,
 };
 
 interface SidebarProps {
