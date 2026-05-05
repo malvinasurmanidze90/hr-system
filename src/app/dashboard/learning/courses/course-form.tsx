@@ -6,7 +6,7 @@ import { createClient } from '@/lib/supabase/client';
 import { Button } from '@/components/ui/button';
 
 interface Category { id: string; name: string }
-interface Props { categories: Category[] }
+interface Props { categories: Category[]; companyId?: string | null }
 
 const EMPTY = {
   title: '',
@@ -66,7 +66,7 @@ function StatusCard({
 }
 
 /* ── Main component ────────────────────────────────────────────────── */
-export function CreateCourseButton({ categories }: Props) {
+export function CreateCourseButton({ categories, companyId }: Props) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -90,16 +90,13 @@ export function CreateCourseButton({ categories }: Props) {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { setError('სესია ამოიწურა. განაახლეთ გვერდი.'); setLoading(false); return; }
 
-    const { data: profile } = await supabase
-      .from('profiles').select('company_id').eq('id', user.id).single();
-
     const payload: Record<string, unknown> = {
       title:                      form.title.trim(),
       description:                form.description.trim() || null,
       category:                   form.category || null,
       estimated_duration_minutes: Number(form.duration_minutes),
       status:                     form.status,
-      company_id:                 profile?.company_id,
+      company_id:                 companyId ?? null,
       created_by:                 user.id,
     };
 

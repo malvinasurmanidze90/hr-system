@@ -1,9 +1,11 @@
-﻿import { createClient } from '@/lib/supabase/server';
+﻿import { redirect } from 'next/navigation';
+import { createClient } from '@/lib/supabase/server';
 import { StatusBadge } from '@/components/ui/badge';
 import { CoursesToolbar } from './courses-toolbar';
 import { CreateCourseButton } from './course-form';
 import { CourseCardActions } from './course-card-actions';
 import { getTenantCompany, getTenantScopeCompanyIds } from '@/lib/tenant-server';
+import { getPrimaryRole } from '@/lib/auth/permissions';
 import type { UserRoleAssignment } from '@/types';
 import {
   GraduationCap, Clock, Calendar, BookOpen,
@@ -30,14 +32,23 @@ export default async function CoursesLibraryPage({ searchParams }: Props) {
   const supabase = await createClient();
 
   const { data: { user } } = await supabase.auth.getUser();
-  const { data: rolesData } = user
-    ? await supabase.from('user_roles').select('*').eq('user_id', user.id).eq('is_active', true)
-    : { data: [] };
+  if (!user) redirect('/login');
+
+  const { data: rolesData } = await supabase
+    .from('user_roles').select('*').eq('user_id', user.id).eq('is_active', true);
   const roles: UserRoleAssignment[] = rolesData ?? [];
+  const primaryRole = getPrimaryRole(roles);
+
+  // platform_super_admin has no company context and should not access courses
+  if (primaryRole === 'platform_super_admin') redirect('/dashboard');
 
   const tenantResult = await getTenantCompany();
   const tenantId = tenantResult && tenantResult !== 'not_found' ? tenantResult.id : null;
   const tenantCompanyIds = !tenantId ? await getTenantScopeCompanyIds(roles) : null;
+
+  // Resolve active company for course creation context
+  const { data: profile } = await supabase.from('profiles').select('company_id').eq('id', user.id).single();
+  const activeCompanyId = tenantId ?? profile?.company_id ?? null;
 
   const applyTenant = (q: any) => {
     if (tenantId) return q.eq('company_id', tenantId);
@@ -94,7 +105,9 @@ export default async function CoursesLibraryPage({ searchParams }: Props) {
               <p className="text-indigo-200 text-sm">áƒ¡áƒáƒ¡áƒ¬áƒáƒ•áƒšáƒ áƒ™áƒ£áƒ áƒ¡áƒ”áƒ‘áƒ˜, áƒ¡áƒáƒ•áƒáƒšáƒ“áƒ”áƒ‘áƒ£áƒšáƒ áƒžáƒ áƒáƒ’áƒ áƒáƒ›áƒ”áƒ‘áƒ˜ áƒ“áƒ áƒ’áƒ£áƒœáƒ“áƒ˜áƒ¡ áƒ’áƒáƒœáƒ•áƒ˜áƒ—áƒáƒ áƒ”áƒ‘áƒ</p>
             </div>
             <div className="flex-shrink-0">
-              <CreateCourseButton categories={cats} />
+              {['super_admin','hr_admin','ceo','tenant_super_admin'].includes(primaryRole) && (
+                <CreateCourseButton categories={cats} companyId={activeCompanyId} />
+              )}
             </div>
           </div>
 
