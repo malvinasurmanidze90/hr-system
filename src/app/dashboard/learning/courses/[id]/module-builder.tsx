@@ -6,6 +6,7 @@ import {
   FileText, Video, File, HelpCircle, CheckSquare, ClipboardList,
   AlertCircle, Layers, GripVertical, BookOpen,
 } from 'lucide-react';
+import { AddContentDropdown } from './add-content-dropdown';
 
 /* ── Types ─────────────────────────────────────────────────────────── */
 interface CLessson {
@@ -187,6 +188,15 @@ export function ModuleBuilder({ initialModules, courseId, canManage }: Props) {
     await reload();
   };
 
+  /* ── Add Content dropdown handler ───────────────────────────────── */
+  const handleSelectContentType = (type: string) => {
+    if (modules.length === 0) return;
+    const firstModuleId = modules[0].id;
+    setLesForm({ ...LES_DEF, lesson_type: type });
+    setError('');
+    setLesModal({ open: true, mode: 'add', moduleId: firstModuleId });
+  };
+
   /* ── Toggle expand ───────────────────────────────────────────────── */
   const toggleExpand = (id: string) => setExpanded(prev => {
     const next = new Set(prev);
@@ -200,13 +210,14 @@ export function ModuleBuilder({ initialModules, courseId, canManage }: Props) {
       {/* Header */}
       {canManage && (
         <div className="flex items-center justify-between mb-5">
-          <p className="text-sm text-gray-500">{modules.length} მოდული · {modules.reduce((s, m) => s + m.course_lessons.length, 0)} გაკვეთილი</p>
-          <button
-            onClick={openAddModule}
-            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-xl hover:bg-indigo-700 transition-colors"
-          >
-            <Plus size={15} />მოდულის დამატება
-          </button>
+          <p className="text-sm text-gray-500">
+            {modules.length} მოდული · {modules.reduce((s, m) => s + m.course_lessons.length, 0)} გაკვეთილი
+          </p>
+          <AddContentDropdown
+            onAddSection={openAddModule}
+            onSelectType={handleSelectContentType}
+            hasModules={modules.length > 0}
+          />
         </div>
       )}
 
