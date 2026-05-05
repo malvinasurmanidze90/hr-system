@@ -39,9 +39,6 @@ export default async function CoursesLibraryPage({ searchParams }: Props) {
   const roles: UserRoleAssignment[] = rolesData ?? [];
   const primaryRole = getPrimaryRole(roles);
 
-  // platform_super_admin has no company context and should not access courses
-  if (primaryRole === 'platform_super_admin') redirect('/dashboard');
-
   const tenantResult = await getTenantCompany();
   const tenantId = tenantResult && tenantResult !== 'not_found' ? tenantResult.id : null;
   const tenantCompanyIds = !tenantId ? await getTenantScopeCompanyIds(roles) : null;

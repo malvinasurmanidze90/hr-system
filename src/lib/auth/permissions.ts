@@ -96,7 +96,8 @@ export const NAV_ITEMS: NavItem[] = [
   { label: 'My Learning',    href: '/dashboard/portal',               icon: 'BookOpen',        roles: ['employee','manager','bu_head'] },
 
   // ── Learning Management ───────────────────────────────────────────────
-  { label: 'Courses',        href: '/dashboard/learning/courses',     icon: 'GraduationCap',   roles: ['tenant_super_admin','super_admin','hr_admin','ceo','bu_head','manager','employee'], section: 'Learning Management' },
+  { label: 'Learning Management', href: '/dashboard/learning',         icon: 'BookMarked',      roles: ['platform_super_admin','tenant_super_admin','super_admin','hr_admin','ceo','bu_head','manager','employee'], section: 'Learning Management' },
+  { label: 'Courses',        href: '/dashboard/learning/courses',     icon: 'GraduationCap',   roles: ['platform_super_admin','tenant_super_admin','super_admin','hr_admin','ceo','bu_head','manager','employee'], section: 'Learning Management' },
 
   // ── Admin ─────────────────────────────────────────────────────────────
   { label: 'Users',          href: '/dashboard/admin/users',          icon: 'Users',           roles: ['tenant_super_admin','super_admin','hr_admin','ceo'],                               section: 'Admin' },

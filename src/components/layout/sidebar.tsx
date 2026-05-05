@@ -2,7 +2,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
-  LayoutDashboard, BookOpen, GraduationCap, UserCheck, Users,
+  LayoutDashboard, BookOpen, BookMarked, GraduationCap, UserCheck, Users,
   Building2, Building, BarChart3, Sparkles, LogOut, ChevronLeft, ChevronRight, Bell, Tag, Layers,
 } from 'lucide-react';
 import { cn, getInitials } from '@/lib/utils';
@@ -13,7 +13,7 @@ import { createClient } from '@/lib/supabase/client';
 import { useRouter } from 'next/navigation';
 
 const ICON_MAP: Record<string, React.ElementType> = {
-  LayoutDashboard, BookOpen, GraduationCap, UserCheck,
+  LayoutDashboard, BookOpen, BookMarked, GraduationCap, UserCheck,
   Users, Building2, Building, BarChart3, Sparkles, Tag, Layers,
 };
 
