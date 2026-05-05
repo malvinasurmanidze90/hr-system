@@ -3,7 +3,7 @@ import { createClient } from '@/lib/supabase/server';
 import { canManageTenants } from '@/lib/auth/permissions';
 import { Building2, Globe, Calendar, CheckCircle2, XCircle, Layers } from 'lucide-react';
 import { formatDate } from '@/lib/utils';
-import { CreateTenantButton } from './tenant-actions';
+import { CreateTenantButton, TenantRowActions } from './tenant-actions';
 import type { UserRoleAssignment, Tenant } from '@/types';
 
 export const metadata = { title: 'Tenants' };
@@ -47,11 +47,11 @@ export default async function TenantsPage() {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
+          <div className="grid grid-cols-3 gap-3">
             {[
-              { label: 'Total Tenants',  value: allTenants.length },
-              { label: 'Active',         value: activeTenants },
-              { label: 'Inactive',       value: allTenants.length - activeTenants },
+              { label: 'Total Tenants', value: allTenants.length },
+              { label: 'Active',        value: activeTenants },
+              { label: 'Inactive',      value: allTenants.length - activeTenants },
             ].map(({ label, value }) => (
               <div key={label} className="bg-white/10 backdrop-blur-sm border border-white/20 rounded-2xl p-4">
                 <p className="text-2xl font-bold text-white">{value}</p>
@@ -80,8 +80,8 @@ export default async function TenantsPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-gray-50 border-b border-gray-200">
-                    {['Tenant', 'Slug / Domain', 'Companies', 'Status', 'Created'].map(h => (
-                      <th key={h} className="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">
+                    {['Tenant', 'Slug / Domain', 'Companies', 'Status', 'Created', ''].map((h, i) => (
+                      <th key={i} className="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">
                         {h}
                       </th>
                     ))}
@@ -98,20 +98,21 @@ export default async function TenantsPage() {
                               <Building2 size={16} className="text-white" />
                             </div>
                             <div>
-                              <p className="font-semibold text-gray-900">{tenant.name}</p>
+                              <a
+                                href={`/dashboard/platform/tenants/${tenant.id}`}
+                                className="font-semibold text-gray-900 hover:text-indigo-600 transition-colors"
+                              >
+                                {tenant.name}
+                              </a>
                               <p className="text-xs text-gray-400">ID: {tenant.id.slice(0, 8)}…</p>
                             </div>
                           </div>
                         </td>
                         <td className="px-5 py-4">
-                          <div className="space-y-0.5">
-                            <p className="font-mono text-xs text-indigo-600 flex items-center gap-1">
-                              <Globe size={11} />{tenant.slug}.hrapp.org
-                            </p>
-                            {tenant.domain && (
-                              <p className="text-xs text-gray-400">{tenant.domain}</p>
-                            )}
-                          </div>
+                          <p className="font-mono text-xs text-indigo-600 flex items-center gap-1">
+                            <Globe size={11} />{tenant.slug}.hrapp.org
+                          </p>
+                          {tenant.domain && <p className="text-xs text-gray-400 mt-0.5">{tenant.domain}</p>}
                         </td>
                         <td className="px-5 py-4">
                           <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-indigo-50 text-indigo-700 border border-indigo-100">
@@ -129,11 +130,14 @@ export default async function TenantsPage() {
                             </span>
                           )}
                         </td>
-                        <td className="px-5 py-4">
-                          <span className="flex items-center gap-1 text-sm text-gray-400">
+                        <td className="px-5 py-4 text-sm text-gray-400">
+                          <span className="flex items-center gap-1">
                             <Calendar size={12} className="text-indigo-400" />
                             {formatDate(tenant.created_at)}
                           </span>
+                        </td>
+                        <td className="px-5 py-4">
+                          <TenantRowActions tenant={tenant} />
                         </td>
                       </tr>
                     );
