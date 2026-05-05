@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 import { canViewReports } from '@/lib/auth/permissions';
+import { getTenantCompany } from '@/lib/tenant-server';
 import { StatusBadge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { BarChart3, Users, GraduationCap, TrendingUp, AlertTriangle, CheckCircle2 } from 'lucide-react';
@@ -18,6 +19,11 @@ export default async function ReportsPage() {
   const roles: UserRoleAssignment[] = rolesData ?? [];
   if (!canViewReports(roles)) redirect('/dashboard');
 
+  const tenantResult = await getTenantCompany();
+  const cid = tenantResult && tenantResult !== 'not_found' ? tenantResult.id : null;
+
+  const applyTenant = (q: any) => cid ? q.eq('company_id', cid) : q;
+
   const [
     { count: totalUsers },
     { count: totalCourses },
@@ -27,8 +33,8 @@ export default async function ReportsPage() {
     { data: recentCompletions },
     { data: courseStats },
   ] = await Promise.all([
-    supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('status', 'active'),
-    supabase.from('courses').select('*', { count: 'exact', head: true }).eq('status', 'published'),
+    applyTenant(supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('status', 'active')),
+    applyTenant(supabase.from('courses').select('*', { count: 'exact', head: true }).eq('status', 'published')),
     supabase.from('course_enrollments').select('*', { count: 'exact', head: true }),
     supabase.from('course_enrollments').select('*', { count: 'exact', head: true }).eq('status', 'completed'),
     supabase.from('course_enrollments').select('*', { count: 'exact', head: true }).eq('status', 'overdue'),
@@ -37,10 +43,7 @@ export default async function ReportsPage() {
       .eq('status', 'completed')
       .order('completed_at', { ascending: false })
       .limit(10),
-    supabase.from('courses')
-      .select('id, title, course_enrollments(status)')
-      .eq('status', 'published')
-      .limit(10),
+    applyTenant(supabase.from('courses').select('id, title, course_enrollments(status)').eq('status', 'published').limit(10)),
   ]);
 
   const completionRate = totalEnrollments
@@ -128,7 +131,7 @@ export default async function ReportsPage() {
               <h3 className="text-sm font-semibold text-gray-900">Course Completion Rates</h3>
             </div>
             <div className="space-y-4">
-              {courseStatsFormatted.map((c, i) => (
+              {courseStatsFormatted.map((c: any, i: number) => (
                 <div key={i}>
                   <div className="flex justify-between text-sm mb-1.5">
                     <span className="text-gray-700 truncate max-w-[60%] font-medium">{c.title}</span>

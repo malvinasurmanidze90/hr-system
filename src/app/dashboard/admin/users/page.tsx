@@ -5,6 +5,7 @@ import { Badge, StatusBadge } from '@/components/ui/badge';
 import { Users } from 'lucide-react';
 import { formatDate, getInitials } from '@/lib/utils';
 import { UserActions } from './user-actions';
+import { getTenantCompany } from '@/lib/tenant-server';
 import type { UserRoleAssignment, UserRole } from '@/types';
 
 export const metadata = { title: 'Users' };
@@ -18,11 +19,14 @@ export default async function UsersPage() {
   const roles: UserRoleAssignment[] = rolesData ?? [];
   if (!canManageUsers(roles)) redirect('/dashboard');
 
-  const { data: profiles } = await supabase
-    .from('profiles')
-    .select('*, user_roles(*)')
-    .order('full_name');
+  // Tenant scoping: filter by tenant company when on a subdomain
+  const tenant = await getTenantCompany();
+  if (tenant === 'not_found') redirect('/tenant-not-found');
 
+  let profilesQuery = supabase.from('profiles').select('*, user_roles(*)').order('full_name');
+  if (tenant) profilesQuery = profilesQuery.eq('company_id', tenant.id);
+
+  const { data: profiles } = await profilesQuery;
   const { data: companies }     = await supabase.from('companies').select('id, name');
   const { data: businessUnits } = await supabase.from('business_units').select('id, name, company_id');
 
@@ -35,7 +39,9 @@ export default async function UsersPage() {
           <div className="flex items-start justify-between gap-4 mb-8">
             <div>
               <h1 className="text-2xl font-bold text-white mb-1">Users & Employees</h1>
-              <p className="text-indigo-200 text-sm">Manage team members, roles, and access</p>
+              <p className="text-indigo-200 text-sm">
+                {tenant ? `${tenant.name} · ` : ''}Manage team members, roles, and access
+              </p>
             </div>
             <UserActions companies={companies ?? []} businessUnits={businessUnits ?? []} />
           </div>

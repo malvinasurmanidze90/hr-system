@@ -5,6 +5,7 @@ import { StatusBadge } from '@/components/ui/badge';
 import { Building2, MapPin, Calendar } from 'lucide-react';
 import { formatDate } from '@/lib/utils';
 import { BusinessUnitActions } from './bu-actions';
+import { getTenantCompany } from '@/lib/tenant-server';
 import type { UserRoleAssignment } from '@/types';
 
 export const metadata = { title: 'Business Units' };
@@ -18,11 +19,15 @@ export default async function BusinessUnitsPage() {
   const roles: UserRoleAssignment[] = rolesData ?? [];
   if (!canManageCompany(roles)) redirect('/dashboard');
 
-  const { data: companies }     = await supabase.from('companies').select('id, name').order('name');
-  const { data: businessUnits } = await supabase
-    .from('business_units')
-    .select('*, company:companies(name)')
-    .order('name');
+  const tenant = await getTenantCompany();
+  if (tenant === 'not_found') redirect('/tenant-not-found');
+
+  const { data: companies } = await supabase.from('companies').select('id, name').order('name');
+
+  let buQuery = supabase.from('business_units').select('*, company:companies(name)').order('name');
+  if (tenant) buQuery = buQuery.eq('company_id', tenant.id);
+
+  const { data: businessUnits } = await buQuery;
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -33,9 +38,11 @@ export default async function BusinessUnitsPage() {
           <div className="flex items-start justify-between gap-4 mb-8">
             <div>
               <h1 className="text-2xl font-bold text-white mb-1">Business Units</h1>
-              <p className="text-indigo-200 text-sm">Manage departments and business objects</p>
+              <p className="text-indigo-200 text-sm">
+                {tenant ? `${tenant.name} · ` : ''}Manage departments and business objects
+              </p>
             </div>
-            <BusinessUnitActions companies={companies ?? []} />
+            <BusinessUnitActions companies={tenant ? companies?.filter(c => c.id === tenant.id) ?? [] : companies ?? []} />
           </div>
 
           {/* Stats */}
@@ -65,9 +72,7 @@ export default async function BusinessUnitsPage() {
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
             {businessUnits.map((bu: any) => (
               <div key={bu.id} className="group bg-white rounded-2xl border border-gray-200 shadow-sm hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200 overflow-hidden">
-                {/* Top accent strip */}
                 <div className="h-1.5 bg-gradient-to-r from-indigo-500 to-purple-600" />
-
                 <div className="p-5">
                   <div className="flex items-start gap-3 mb-4">
                     <div className="w-10 h-10 bg-gradient-to-br from-indigo-100 to-purple-100 rounded-2xl flex items-center justify-center flex-shrink-0">
@@ -79,11 +84,9 @@ export default async function BusinessUnitsPage() {
                     </div>
                     <StatusBadge status={bu.is_active ? 'active' : 'archived'} />
                   </div>
-
                   {bu.description && (
                     <p className="text-sm text-gray-500 mb-4 line-clamp-2 leading-relaxed">{bu.description}</p>
                   )}
-
                   <div className="flex items-center justify-between text-xs text-gray-400 pt-3 border-t border-gray-100">
                     <span className="flex items-center gap-1">
                       <MapPin size={11} className="text-indigo-400" />{bu.company?.name}

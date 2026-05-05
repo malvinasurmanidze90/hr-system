@@ -3,6 +3,7 @@ import { StatusBadge } from '@/components/ui/badge';
 import { CoursesToolbar } from './courses-toolbar';
 import { CreateCourseButton } from './course-form';
 import { CourseCardActions } from './course-card-actions';
+import { getTenantCompany } from '@/lib/tenant-server';
 import {
   GraduationCap, Clock, Calendar, BookOpen,
   ShieldCheck, TrendingUp, FileText, Users, AlertCircle,
@@ -27,6 +28,11 @@ export default async function CoursesLibraryPage({ searchParams }: Props) {
   const { q, status, cat, mandatory, view } = await searchParams;
   const supabase = await createClient();
 
+  const tenantResult = await getTenantCompany();
+  const tenantId = tenantResult && tenantResult !== 'not_found' ? tenantResult.id : null;
+
+  const applyTenant = (q: any) => tenantId ? q.eq('company_id', tenantId) : q;
+
   /* parallel: counts + categories */
   const [
     { count: totalCount },
@@ -35,18 +41,20 @@ export default async function CoursesLibraryPage({ searchParams }: Props) {
     { count: mandatoryCount },
     { data: categories },
   ] = await Promise.all([
-    supabase.from('courses').select('*', { count: 'exact', head: true }),
-    supabase.from('courses').select('*', { count: 'exact', head: true }).eq('status', 'published'),
-    supabase.from('courses').select('*', { count: 'exact', head: true }).eq('status', 'draft'),
-    supabase.from('courses').select('*', { count: 'exact', head: true }).eq('is_mandatory', true),
+    applyTenant(supabase.from('courses').select('*', { count: 'exact', head: true })),
+    applyTenant(supabase.from('courses').select('*', { count: 'exact', head: true }).eq('status', 'published')),
+    applyTenant(supabase.from('courses').select('*', { count: 'exact', head: true }).eq('status', 'draft')),
+    applyTenant(supabase.from('courses').select('*', { count: 'exact', head: true }).eq('is_mandatory', true)),
     supabase.from('course_categories').select('id, name').eq('status', 'active').order('name'),
   ]);
 
   /* main courses query */
-  let query = supabase
-    .from('courses')
-    .select('id, title, description, category, estimated_duration_minutes, status, is_mandatory, created_at, course_enrollments(count)')
-    .order('created_at', { ascending: false });
+  let query = applyTenant(
+    supabase
+      .from('courses')
+      .select('id, title, description, category, estimated_duration_minutes, status, is_mandatory, created_at, course_enrollments(count)')
+      .order('created_at', { ascending: false })
+  );
 
   if (status && ['draft', 'published', 'archived'].includes(status)) query = query.eq('status', status);
   if (cat)                   query = query.eq('category', cat);

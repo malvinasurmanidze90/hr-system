@@ -5,6 +5,7 @@ import { StatusBadge } from '@/components/ui/badge';
 import { Building, Users, Calendar, Globe } from 'lucide-react';
 import { formatDate } from '@/lib/utils';
 import { CompanyActions } from './company-actions';
+import { getTenantCompany } from '@/lib/tenant-server';
 import type { UserRoleAssignment } from '@/types';
 
 export const metadata = { title: 'Companies' };
@@ -18,7 +19,14 @@ export default async function CompaniesPage() {
   const roles: UserRoleAssignment[] = rolesData ?? [];
   if (getPrimaryRole(roles) !== 'super_admin') redirect('/dashboard');
 
-  const { data: companies } = await supabase.from('companies').select('*').order('name');
+  const tenant = await getTenantCompany();
+  if (tenant === 'not_found') redirect('/tenant-not-found');
+
+  // On subdomain: show only that company. On main domain: show all.
+  let companiesQuery = supabase.from('companies').select('*').order('name');
+  if (tenant) companiesQuery = companiesQuery.eq('id', tenant.id);
+
+  const { data: companies } = await companiesQuery;
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -29,9 +37,11 @@ export default async function CompaniesPage() {
           <div className="flex items-start justify-between gap-4 mb-8">
             <div>
               <h1 className="text-2xl font-bold text-white mb-1">Companies</h1>
-              <p className="text-indigo-200 text-sm">Manage all organizations in the system</p>
+              <p className="text-indigo-200 text-sm">
+                {tenant ? `Viewing: ${tenant.name}` : 'Manage all organizations in the system'}
+              </p>
             </div>
-            <CompanyActions />
+            {!tenant && <CompanyActions />}
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="bg-white/10 backdrop-blur-sm border border-white/20 rounded-2xl p-4">
@@ -70,6 +80,9 @@ export default async function CompaniesPage() {
                       <p className="text-xs text-gray-400 flex items-center gap-1 mt-0.5">
                         <Globe size={10} />{company.industry ?? 'No industry'}
                       </p>
+                      {company.slug && (
+                        <p className="text-xs font-mono text-indigo-400 mt-0.5">{company.slug}.hrapp.org</p>
+                      )}
                     </div>
                     <StatusBadge status={company.is_active ? 'active' : 'archived'} />
                   </div>
