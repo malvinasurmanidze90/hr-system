@@ -39,6 +39,12 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const roles: UserRoleAssignment[] = rolesData ?? [];
   const primaryRole = getPrimaryRole(roles);
 
+  // profile.company may be a single object or an array depending on Supabase join resolution
+  const rawCompany = profile?.company;
+  const companyObj = Array.isArray(rawCompany) ? (rawCompany[0] ?? null) : (rawCompany ?? null);
+  const profileCompanyTenantId = (companyObj as { tenant_id?: string | null } | null)?.tenant_id ?? null;
+  const profileCompanyName = (companyObj as { name?: string } | null)?.name;
+
   // Resolve tenant_id for module gating — three fallbacks:
   // 1. Subdomain: company.tenant_id from x-tenant-slug header
   // 2. Main domain as tenant_super_admin: tenant_id stored on their role row
@@ -46,14 +52,13 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const tenantIdForModules =
     (tenantResult as { tenant_id?: string | null } | null)?.tenant_id ??
     roles.find(r => r.role === 'tenant_super_admin' && r.is_active && r.tenant_id)?.tenant_id ??
-    (profile?.company as { tenant_id?: string | null } | null)?.tenant_id ??
+    profileCompanyTenantId ??
     null;
 
-  const enabledModules = await getEnabledModules(tenantIdForModules ?? null);
+  const enabledModules = await getEnabledModules(tenantIdForModules);
 
   // Prefer tenant company name when on a subdomain
-  const companyName =
-    tenantData.companyName ?? (profile?.company as { name?: string } | null)?.name;
+  const companyName = tenantData.companyName ?? profileCompanyName;
 
   return (
     <TenantProvider value={tenantData}>

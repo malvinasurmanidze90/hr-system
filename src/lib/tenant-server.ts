@@ -17,14 +17,18 @@ export interface TenantCompany {
  */
 export async function getEnabledModules(tenantId: string | null): Promise<string[]> {
   if (!tenantId) return [];
-  // Service client: tenantId is already trusted (resolved from user's role/company/subdomain)
-  const supabase = await createServiceClient();
-  const { data } = await supabase
-    .from('tenant_modules')
-    .select('module_key')
-    .eq('tenant_id', tenantId)
-    .eq('is_enabled', true);
-  return data?.map(r => r.module_key) ?? [];
+  try {
+    // Service client: tenantId is already trusted (resolved from user's role/company/subdomain)
+    const supabase = await createServiceClient();
+    const { data } = await supabase
+      .from('tenant_modules')
+      .select('module_key')
+      .eq('tenant_id', tenantId)
+      .eq('is_enabled', true);
+    return data?.map(r => r.module_key) ?? [];
+  } catch {
+    return [];
+  }
 }
 
 /**
