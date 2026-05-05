@@ -1,7 +1,7 @@
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 import { canViewReports } from '@/lib/auth/permissions';
-import { getTenantCompany } from '@/lib/tenant-server';
+import { getTenantCompany, getTenantScopeCompanyIds } from '@/lib/tenant-server';
 import { StatusBadge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { BarChart3, Users, GraduationCap, TrendingUp, AlertTriangle, CheckCircle2 } from 'lucide-react';
@@ -21,8 +21,13 @@ export default async function ReportsPage() {
 
   const tenantResult = await getTenantCompany();
   const cid = tenantResult && tenantResult !== 'not_found' ? tenantResult.id : null;
+  const tenantCompanyIds = !cid ? await getTenantScopeCompanyIds(roles) : null;
 
-  const applyTenant = (q: any) => cid ? q.eq('company_id', cid) : q;
+  const applyTenant = (q: any) => {
+    if (cid) return q.eq('company_id', cid);
+    if (tenantCompanyIds?.length) return q.in('company_id', tenantCompanyIds);
+    return q;
+  };
 
   const [
     { count: totalUsers },

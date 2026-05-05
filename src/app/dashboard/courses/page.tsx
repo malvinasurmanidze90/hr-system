@@ -3,7 +3,8 @@ import { StatusBadge } from '@/components/ui/badge';
 import { CoursesToolbar } from './courses-toolbar';
 import { CreateCourseButton } from './course-form';
 import { CourseCardActions } from './course-card-actions';
-import { getTenantCompany } from '@/lib/tenant-server';
+import { getTenantCompany, getTenantScopeCompanyIds } from '@/lib/tenant-server';
+import type { UserRoleAssignment } from '@/types';
 import {
   GraduationCap, Clock, Calendar, BookOpen,
   ShieldCheck, TrendingUp, FileText, Users, AlertCircle,
@@ -28,10 +29,21 @@ export default async function CoursesLibraryPage({ searchParams }: Props) {
   const { q, status, cat, mandatory, view } = await searchParams;
   const supabase = await createClient();
 
+  const { data: { user } } = await supabase.auth.getUser();
+  const { data: rolesData } = user
+    ? await supabase.from('user_roles').select('*').eq('user_id', user.id).eq('is_active', true)
+    : { data: [] };
+  const roles: UserRoleAssignment[] = rolesData ?? [];
+
   const tenantResult = await getTenantCompany();
   const tenantId = tenantResult && tenantResult !== 'not_found' ? tenantResult.id : null;
+  const tenantCompanyIds = !tenantId ? await getTenantScopeCompanyIds(roles) : null;
 
-  const applyTenant = (q: any) => tenantId ? q.eq('company_id', tenantId) : q;
+  const applyTenant = (q: any) => {
+    if (tenantId) return q.eq('company_id', tenantId);
+    if (tenantCompanyIds?.length) return q.in('company_id', tenantCompanyIds);
+    return q;
+  };
 
   /* parallel: counts + categories */
   const [

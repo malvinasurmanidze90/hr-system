@@ -5,7 +5,7 @@ import { Badge, StatusBadge } from '@/components/ui/badge';
 import { Users } from 'lucide-react';
 import { formatDate, getInitials } from '@/lib/utils';
 import { UserActions } from './user-actions';
-import { getTenantCompany } from '@/lib/tenant-server';
+import { getTenantCompany, getTenantScopeCompanyIds } from '@/lib/tenant-server';
 import type { UserRoleAssignment, UserRole } from '@/types';
 
 export const metadata = { title: 'Users' };
@@ -19,16 +19,26 @@ export default async function UsersPage() {
   const roles: UserRoleAssignment[] = rolesData ?? [];
   if (!canManageUsers(roles)) redirect('/dashboard');
 
-  // Tenant scoping: filter by tenant company when on a subdomain
+  // Tenant scoping: subdomain takes priority, then role-based for tenant_super_admin
   const tenant = await getTenantCompany();
   if (tenant === 'not_found') redirect('/tenant-not-found');
+  const tenantCompanyIds = !tenant ? await getTenantScopeCompanyIds(roles) : null;
 
   let profilesQuery = supabase.from('profiles').select('*, user_roles(*)').order('full_name');
   if (tenant) profilesQuery = profilesQuery.eq('company_id', tenant.id);
+  else if (tenantCompanyIds?.length) profilesQuery = profilesQuery.in('company_id', tenantCompanyIds);
 
   const { data: profiles } = await profilesQuery;
-  const { data: companies }     = await supabase.from('companies').select('id, name');
-  const { data: businessUnits } = await supabase.from('business_units').select('id, name, company_id');
+
+  let companiesQuery = supabase.from('companies').select('id, name');
+  if (tenant) companiesQuery = companiesQuery.eq('id', tenant.id);
+  else if (tenantCompanyIds?.length) companiesQuery = companiesQuery.in('id', tenantCompanyIds);
+  const { data: companies } = await companiesQuery;
+
+  let buQuery = supabase.from('business_units').select('id, name, company_id');
+  if (tenant) buQuery = buQuery.eq('company_id', tenant.id);
+  else if (tenantCompanyIds?.length) buQuery = buQuery.in('company_id', tenantCompanyIds);
+  const { data: businessUnits } = await buQuery;
 
   return (
     <div className="min-h-screen bg-slate-50">

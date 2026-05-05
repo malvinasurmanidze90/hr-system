@@ -5,7 +5,7 @@ import { StatusBadge } from '@/components/ui/badge';
 import { Building2, MapPin, Calendar } from 'lucide-react';
 import { formatDate } from '@/lib/utils';
 import { BusinessUnitActions } from './bu-actions';
-import { getTenantCompany } from '@/lib/tenant-server';
+import { getTenantCompany, getTenantScopeCompanyIds } from '@/lib/tenant-server';
 import type { UserRoleAssignment } from '@/types';
 
 export const metadata = { title: 'Business Units' };
@@ -21,11 +21,16 @@ export default async function BusinessUnitsPage() {
 
   const tenant = await getTenantCompany();
   if (tenant === 'not_found') redirect('/tenant-not-found');
+  const tenantCompanyIds = !tenant ? await getTenantScopeCompanyIds(roles) : null;
 
-  const { data: companies } = await supabase.from('companies').select('id, name').order('name');
+  let companiesQuery = supabase.from('companies').select('id, name').order('name');
+  if (tenant) companiesQuery = companiesQuery.eq('id', tenant.id);
+  else if (tenantCompanyIds?.length) companiesQuery = companiesQuery.in('id', tenantCompanyIds);
+  const { data: companies } = await companiesQuery;
 
   let buQuery = supabase.from('business_units').select('*, company:companies(name)').order('name');
   if (tenant) buQuery = buQuery.eq('company_id', tenant.id);
+  else if (tenantCompanyIds?.length) buQuery = buQuery.in('company_id', tenantCompanyIds);
 
   const { data: businessUnits } = await buQuery;
 
@@ -42,7 +47,7 @@ export default async function BusinessUnitsPage() {
                 {tenant ? `${tenant.name} · ` : ''}Manage departments and business objects
               </p>
             </div>
-            <BusinessUnitActions companies={tenant ? companies?.filter(c => c.id === tenant.id) ?? [] : companies ?? []} />
+            <BusinessUnitActions companies={companies ?? []} />
           </div>
 
           {/* Stats */}
