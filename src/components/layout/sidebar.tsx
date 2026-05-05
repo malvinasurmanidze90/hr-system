@@ -63,25 +63,34 @@ export function Sidebar({ userName, userEmail, primaryRole, companyName }: Sideb
       </div>
 
       {/* Navigation */}
-      <nav className="flex-1 px-2 py-3 overflow-y-auto space-y-0.5">
-        {navItems.map(item => {
+      <nav className="flex-1 px-2 py-3 overflow-y-auto">
+        {navItems.map((item, i) => {
           const Icon = ICON_MAP[item.icon] ?? LayoutDashboard;
           const active = pathname === item.href || pathname.startsWith(item.href + '/');
+          const prevSection = i > 0 ? navItems[i - 1].section : undefined;
+          const showSection = !collapsed && item.section && item.section !== prevSection;
+
           return (
-            <Link
-              key={item.href}
-              href={item.href}
-              title={collapsed ? item.label : undefined}
-              className={cn(
-                'flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors',
-                active
-                  ? 'bg-indigo-50 text-indigo-700 font-semibold'
-                  : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
+            <div key={item.href}>
+              {showSection && (
+                <p className="px-3 pt-4 pb-1 text-[10px] font-bold text-gray-400 uppercase tracking-widest select-none">
+                  {item.section}
+                </p>
               )}
-            >
-              <Icon size={18} className="flex-shrink-0" />
-              {!collapsed && <span className="truncate">{item.label}</span>}
-            </Link>
+              <Link
+                href={item.href}
+                title={collapsed ? item.label : undefined}
+                className={cn(
+                  'flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors',
+                  active
+                    ? 'bg-indigo-50 text-indigo-700 font-semibold'
+                    : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
+                )}
+              >
+                <Icon size={18} className="flex-shrink-0" />
+                {!collapsed && <span className="truncate">{item.label}</span>}
+              </Link>
+            </div>
           );
         })}
       </nav>

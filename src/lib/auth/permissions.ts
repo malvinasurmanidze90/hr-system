@@ -86,20 +86,26 @@ export interface NavItem {
   href: string;
   icon: string;
   roles: UserRole[];
+  section?: string;
 }
 
 export const NAV_ITEMS: NavItem[] = [
-  { label: 'Dashboard',       href: '/dashboard',                      icon: 'LayoutDashboard', roles: ['platform_super_admin','tenant_super_admin','super_admin','ceo','hr_admin','bu_head','manager','employee'] },
-  { label: 'Tenants',         href: '/dashboard/platform/tenants',     icon: 'Layers',          roles: ['platform_super_admin'] },
-  { label: 'My Learning',     href: '/dashboard/portal',               icon: 'BookOpen',        roles: ['employee','manager','bu_head'] },
-  { label: 'კურსები',         href: '/dashboard/courses',              icon: 'GraduationCap',   roles: ['tenant_super_admin','super_admin','hr_admin','ceo','bu_head','manager','employee'] },
-  { label: 'კურს. კატეგ.',   href: '/dashboard/course-categories',    icon: 'Tag',             roles: ['tenant_super_admin','super_admin','hr_admin','ceo'] },
-  { label: 'Onboarding',      href: '/dashboard/lms/onboarding',       icon: 'UserCheck',       roles: ['tenant_super_admin','super_admin','hr_admin','ceo','bu_head','manager'] },
-  { label: 'Users',           href: '/dashboard/admin/users',          icon: 'Users',           roles: ['tenant_super_admin','super_admin','hr_admin','ceo'] },
-  { label: 'Business Units',  href: '/dashboard/admin/business-units', icon: 'Building2',       roles: ['tenant_super_admin','super_admin','hr_admin'] },
-  { label: 'Companies',       href: '/dashboard/admin/companies',      icon: 'Building',        roles: ['platform_super_admin','tenant_super_admin','super_admin'] },
-  { label: 'Reports',         href: '/dashboard/reports',              icon: 'BarChart3',       roles: ['tenant_super_admin','super_admin','hr_admin','ceo','bu_head','manager'] },
-  { label: 'AI Assistant',    href: '/dashboard/ai',                   icon: 'Sparkles',        roles: ['platform_super_admin','tenant_super_admin','super_admin','hr_admin','ceo','bu_head','manager','employee'] },
+  // ── General ──────────────────────────────────────────────────────────
+  { label: 'Dashboard',      href: '/dashboard',                      icon: 'LayoutDashboard', roles: ['platform_super_admin','tenant_super_admin','super_admin','ceo','hr_admin','bu_head','manager','employee'] },
+  { label: 'Tenants',        href: '/dashboard/platform/tenants',     icon: 'Layers',          roles: ['platform_super_admin'] },
+  { label: 'My Learning',    href: '/dashboard/portal',               icon: 'BookOpen',        roles: ['employee','manager','bu_head'] },
+
+  // ── Learning Management ───────────────────────────────────────────────
+  { label: 'Courses',        href: '/dashboard/learning/courses',     icon: 'GraduationCap',   roles: ['tenant_super_admin','super_admin','hr_admin','ceo','bu_head','manager','employee'], section: 'Learning Management' },
+
+  // ── Admin ─────────────────────────────────────────────────────────────
+  { label: 'Users',          href: '/dashboard/admin/users',          icon: 'Users',           roles: ['tenant_super_admin','super_admin','hr_admin','ceo'],                               section: 'Admin' },
+  { label: 'Business Units', href: '/dashboard/admin/business-units', icon: 'Building2',       roles: ['tenant_super_admin','super_admin','hr_admin'],                                     section: 'Admin' },
+  { label: 'Companies',      href: '/dashboard/admin/companies',      icon: 'Building',        roles: ['platform_super_admin','tenant_super_admin','super_admin'],                         section: 'Admin' },
+
+  // ── Tools ─────────────────────────────────────────────────────────────
+  { label: 'Reports',        href: '/dashboard/reports',              icon: 'BarChart3',       roles: ['tenant_super_admin','super_admin','hr_admin','ceo','bu_head','manager'],            section: 'Tools' },
+  { label: 'AI Assistant',   href: '/dashboard/ai',                   icon: 'Sparkles',        roles: ['platform_super_admin','tenant_super_admin','super_admin','hr_admin','ceo','bu_head','manager','employee'], section: 'Tools' },
 ];
 
 export function getNavItems(primaryRole: UserRole): NavItem[] {
