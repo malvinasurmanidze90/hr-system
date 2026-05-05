@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { useToast, ToastContainer } from '@/components/ui/toast';
-import { Plus, Globe, MoreVertical, Eye, Pencil, PowerOff, Power } from 'lucide-react';
+import { Plus, Globe, MoreVertical, Eye, Pencil, PowerOff, Power, LayoutGrid } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { Tenant } from '@/types';
 

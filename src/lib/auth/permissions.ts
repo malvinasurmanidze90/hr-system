@@ -87,17 +87,18 @@ export interface NavItem {
   icon: string;
   roles: UserRole[];
   section?: string;
+  module?: string; // module_key — gated for non-platform admins unless tenant has it enabled
 }
 
 export const NAV_ITEMS: NavItem[] = [
   // ── General ──────────────────────────────────────────────────────────
   { label: 'Dashboard',      href: '/dashboard',                      icon: 'LayoutDashboard', roles: ['platform_super_admin','tenant_super_admin','super_admin','ceo','hr_admin','bu_head','manager','employee'] },
   { label: 'Tenants',        href: '/dashboard/platform/tenants',     icon: 'Layers',          roles: ['platform_super_admin'] },
-  { label: 'My Learning',    href: '/dashboard/portal',               icon: 'BookOpen',        roles: ['employee','manager','bu_head'] },
+  { label: 'My Learning',    href: '/dashboard/portal',               icon: 'BookOpen',        roles: ['employee','manager','bu_head'],                                                                      module: 'learning_management' },
 
   // ── Learning Management ───────────────────────────────────────────────
-  { label: 'Learning Management', href: '/dashboard/learning',         icon: 'BookMarked',      roles: ['platform_super_admin','tenant_super_admin','super_admin','hr_admin','ceo','bu_head','manager','employee'], section: 'Learning Management' },
-  { label: 'Courses',        href: '/dashboard/learning/courses',     icon: 'GraduationCap',   roles: ['platform_super_admin','tenant_super_admin','super_admin','hr_admin','ceo','bu_head','manager','employee'], section: 'Learning Management' },
+  { label: 'Learning Management', href: '/dashboard/learning',         icon: 'BookMarked',      roles: ['platform_super_admin','tenant_super_admin','super_admin','hr_admin','ceo','bu_head','manager','employee'], section: 'Learning Management', module: 'learning_management' },
+  { label: 'Courses',        href: '/dashboard/learning/courses',     icon: 'GraduationCap',   roles: ['platform_super_admin','tenant_super_admin','super_admin','hr_admin','ceo','bu_head','manager','employee'], section: 'Learning Management', module: 'learning_management' },
 
   // ── Admin ─────────────────────────────────────────────────────────────
   { label: 'Users',          href: '/dashboard/admin/users',          icon: 'Users',           roles: ['tenant_super_admin','super_admin','hr_admin','ceo'],                               section: 'Admin' },
@@ -109,6 +110,12 @@ export const NAV_ITEMS: NavItem[] = [
   { label: 'AI Assistant',   href: '/dashboard/ai',                   icon: 'Sparkles',        roles: ['platform_super_admin','tenant_super_admin','super_admin','hr_admin','ceo','bu_head','manager','employee'], section: 'Tools' },
 ];
 
-export function getNavItems(primaryRole: UserRole): NavItem[] {
-  return NAV_ITEMS.filter(item => item.roles.includes(primaryRole));
+export function getNavItems(primaryRole: UserRole, enabledModules: string[] = []): NavItem[] {
+  return NAV_ITEMS.filter(item => {
+    if (!item.roles.includes(primaryRole)) return false;
+    if (item.module && primaryRole !== 'platform_super_admin') {
+      return enabledModules.includes(item.module);
+    }
+    return true;
+  });
 }

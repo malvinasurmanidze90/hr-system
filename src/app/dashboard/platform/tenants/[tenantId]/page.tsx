@@ -3,7 +3,7 @@ import { createClient } from '@/lib/supabase/server';
 import { canManageTenants } from '@/lib/auth/permissions';
 import {
   ArrowLeft, Globe, Building2, CheckCircle2, XCircle,
-  UserCog, Calendar, Mail, Users,
+  UserCog, Calendar, Mail, Users, LayoutGrid,
 } from 'lucide-react';
 import { formatDate } from '@/lib/utils';
 import Link from 'next/link';
@@ -13,6 +13,7 @@ import {
   LinkCompanyButton,
   UnlinkCompanyButton,
   CreateCompanyButton,
+  ModuleToggleSection,
 } from './tenant-detail-actions';
 import { StatusBadge } from '@/components/ui/badge';
 import type { UserRoleAssignment } from '@/types';
@@ -42,6 +43,7 @@ export default async function TenantDetailPage({ params }: Props) {
     { data: adminRoles },
     { data: linkedCompanies },
     { data: availableCompanies },
+    { data: tenantModuleRows },
   ] = await Promise.all([
     supabase
       .from('user_roles')
@@ -60,11 +62,23 @@ export default async function TenantDetailPage({ params }: Props) {
       .is('tenant_id', null)
       .eq('is_active', true)
       .order('name'),
+    supabase
+      .from('tenant_modules')
+      .select('module_key, is_enabled')
+      .eq('tenant_id', tenantId),
   ]);
 
   const admins = (adminRoles ?? []) as any[];
   const linked = (linkedCompanies ?? []) as any[];
   const available = (availableCompanies ?? []) as any[];
+
+  const moduleMap: Record<string, boolean> = {};
+  for (const row of tenantModuleRows ?? []) moduleMap[row.module_key] = row.is_enabled;
+
+  const KNOWN_MODULES = [
+    { key: 'learning_management', label: 'Learning Management', description: 'Courses, enrollments, and employee learning paths' },
+  ];
+  const initialModules = KNOWN_MODULES.map(m => ({ ...m, is_enabled: moduleMap[m.key] ?? false }));
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -123,7 +137,9 @@ export default async function TenantDetailPage({ params }: Props) {
       </div>
 
       {/* Content */}
-      <div className="max-w-7xl mx-auto px-6 py-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className="max-w-7xl mx-auto px-6 py-6 space-y-6">
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
         {/* Tenant Admins */}
         <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
@@ -210,6 +226,21 @@ export default async function TenantDetailPage({ params }: Props) {
             </div>
           )}
         </div>
+
+        </div>{/* end two-col grid */}
+
+        {/* Module Access */}
+        <div id="modules" className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+          <div className="flex items-center gap-2 px-5 py-4 border-b border-gray-100">
+            <div className="w-7 h-7 rounded-lg bg-violet-100 flex items-center justify-center">
+              <LayoutGrid size={14} className="text-violet-600" />
+            </div>
+            <h2 className="text-sm font-semibold text-gray-900">Module Access</h2>
+            <span className="ml-1 text-xs text-gray-400">Enable or disable features for this tenant</span>
+          </div>
+          <ModuleToggleSection tenantId={tenantId} initialModules={initialModules} />
+        </div>
+
       </div>
     </div>
   );

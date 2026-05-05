@@ -6,7 +6,8 @@ import { Dialog } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/input';
 import { useToast, ToastContainer } from '@/components/ui/toast';
-import { UserPlus, Link2, Unlink, Plus, Trash2, Globe } from 'lucide-react';
+import { UserPlus, Link2, Unlink, Plus, Trash2, Globe, GraduationCap } from 'lucide-react';
+import { cn } from '@/lib/utils';
 
 interface Company { id: string; name: string; slug?: string; }
 
@@ -184,6 +185,78 @@ export function UnlinkCompanyButton({ tenantId, companyId, companyName }: { tena
       >
         <Unlink size={14} />
       </button>
+    </>
+  );
+}
+
+/* ── Module Toggle Section ───────────────────────────────────────────── */
+
+interface ModuleItem {
+  key: string;
+  label: string;
+  description: string;
+  is_enabled: boolean;
+}
+
+const MODULE_ICONS: Record<string, React.ReactNode> = {
+  learning_management: <GraduationCap size={16} className="text-indigo-600" />,
+};
+
+export function ModuleToggleSection({ tenantId, initialModules }: { tenantId: string; initialModules: ModuleItem[] }) {
+  const { toasts, toast } = useToast();
+  const [modules, setModules] = useState<ModuleItem[]>(initialModules);
+  const [toggling, setToggling] = useState<string | null>(null);
+
+  const handleToggle = async (moduleKey: string, newValue: boolean) => {
+    setToggling(moduleKey);
+    const res = await fetch(`/api/platform/tenants/${tenantId}/modules`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ module_key: moduleKey, is_enabled: newValue }),
+    });
+    const data = await res.json();
+    setToggling(null);
+    if (res.ok) {
+      setModules(prev => prev.map(m => m.key === moduleKey ? { ...m, is_enabled: newValue } : m));
+      toast(`${modules.find(m => m.key === moduleKey)?.label} ${newValue ? 'enabled' : 'disabled'}`);
+    } else {
+      toast(data.error ?? 'Failed to update module', 'error');
+    }
+  };
+
+  return (
+    <>
+      <ToastContainer toasts={toasts} />
+      <div className="divide-y divide-gray-100">
+        {modules.map(m => (
+          <div key={m.key} className="flex items-center gap-4 px-5 py-4">
+            <div className="w-9 h-9 rounded-xl bg-indigo-50 flex items-center justify-center flex-shrink-0">
+              {MODULE_ICONS[m.key] ?? <GraduationCap size={16} className="text-indigo-600" />}
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-gray-900">{m.label}</p>
+              <p className="text-xs text-gray-400 mt-0.5">{m.description}</p>
+            </div>
+            <button
+              role="switch"
+              aria-checked={m.is_enabled}
+              disabled={toggling === m.key}
+              onClick={() => handleToggle(m.key, !m.is_enabled)}
+              className={cn(
+                'relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none disabled:opacity-50',
+                m.is_enabled ? 'bg-indigo-600' : 'bg-gray-200'
+              )}
+            >
+              <span
+                className={cn(
+                  'inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform',
+                  m.is_enabled ? 'translate-x-6' : 'translate-x-1'
+                )}
+              />
+            </button>
+          </div>
+        ))}
+      </div>
     </>
   );
 }

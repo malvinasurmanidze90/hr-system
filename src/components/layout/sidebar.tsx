@@ -22,13 +22,14 @@ interface SidebarProps {
   userEmail: string;
   primaryRole: UserRole;
   companyName?: string;
+  enabledModules?: string[];
 }
 
-export function Sidebar({ userName, userEmail, primaryRole, companyName }: SidebarProps) {
+export function Sidebar({ userName, userEmail, primaryRole, companyName, enabledModules = [] }: SidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
   const [collapsed, setCollapsed] = useState(false);
-  const navItems = getNavItems(primaryRole);
+  const navItems = getNavItems(primaryRole, enabledModules);
 
   const handleSignOut = async () => {
     const supabase = createClient();

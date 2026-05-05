@@ -1,6 +1,6 @@
 import { cache } from 'react';
 import { headers } from 'next/headers';
-import { createClient } from '@/lib/supabase/server';
+import { createClient, createServiceClient } from '@/lib/supabase/server';
 import type { UserRoleAssignment } from '@/types';
 
 export interface TenantCompany {
@@ -8,6 +8,23 @@ export interface TenantCompany {
   name: string;
   slug: string;
   logo_url: string | null;
+  tenant_id: string | null;
+}
+
+/**
+ * Returns the list of enabled module keys for a given tenant.
+ * Returns an empty array if tenantId is null (main domain with no tenant context).
+ */
+export async function getEnabledModules(tenantId: string | null): Promise<string[]> {
+  if (!tenantId) return [];
+  // Service client: tenantId is already trusted (resolved from user's role/company/subdomain)
+  const supabase = await createServiceClient();
+  const { data } = await supabase
+    .from('tenant_modules')
+    .select('module_key')
+    .eq('tenant_id', tenantId)
+    .eq('is_enabled', true);
+  return data?.map(r => r.module_key) ?? [];
 }
 
 /**
@@ -48,7 +65,7 @@ export const getTenantCompany = cache(async (): Promise<TenantCompany | null | '
   const supabase = await createClient();
   const { data } = await supabase
     .from('companies')
-    .select('id, name, slug, logo_url')
+    .select('id, name, slug, logo_url, tenant_id')
     .eq('slug', slug)
     .eq('is_active', true)
     .single();
