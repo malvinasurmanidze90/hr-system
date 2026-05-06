@@ -20,20 +20,20 @@ interface ContentItem {
 
 const SECTIONS: { heading: string; items: ContentItem[] }[] = [
   {
-    heading: 'Standard Content',
+    heading: 'სტანდარტული კონტენტი',
     items: [
       {
         type: 'text',
-        label: 'Text Lesson',
-        description: 'Richtext, articles, guides',
+        label: 'ტექსტური გაკვეთილი',
+        description: 'ტექსტი, სტატიები, სახელმძღვანელოები',
         icon: FileText,
         iconColor: 'text-blue-600',
         iconBg: 'bg-blue-50',
       },
       {
         type: 'video',
-        label: 'Video',
-        description: 'Embed YouTube, Vimeo, or upload',
+        label: 'ვიდეო',
+        description: 'YouTube, Vimeo ან ატვირთვა',
         icon: Video,
         iconColor: 'text-purple-600',
         iconBg: 'bg-purple-50',
@@ -41,15 +41,15 @@ const SECTIONS: { heading: string; items: ContentItem[] }[] = [
       {
         type: 'pdf',
         label: 'PDF',
-        description: 'Upload or link a PDF document',
+        description: 'PDF-ის ატვირთვა ან ბმული',
         icon: File,
         iconColor: 'text-rose-600',
         iconBg: 'bg-rose-50',
       },
       {
         type: 'link',
-        label: 'Link',
-        description: 'External URL or resource',
+        label: 'ბმული',
+        description: 'გარე URL ან რესურსი',
         icon: Link2,
         iconColor: 'text-teal-600',
         iconBg: 'bg-teal-50',
@@ -57,20 +57,20 @@ const SECTIONS: { heading: string; items: ContentItem[] }[] = [
     ],
   },
   {
-    heading: 'Learning Activities',
+    heading: 'სასწავლო აქტივობები',
     items: [
       {
         type: 'quiz',
-        label: 'Quiz',
-        description: 'Multiple choice, true/false',
+        label: 'კითხვარი',
+        description: 'მრავალმხრივი, სწორი/მცდარი',
         icon: HelpCircle,
         iconColor: 'text-amber-600',
         iconBg: 'bg-amber-50',
       },
       {
         type: 'assignment',
-        label: 'Assignment',
-        description: 'File upload or written task',
+        label: 'დავალება',
+        description: 'ფაილის ატვირთვა ან წერილობითი',
         icon: ClipboardList,
         iconColor: 'text-indigo-600',
         iconBg: 'bg-indigo-50',
@@ -78,20 +78,20 @@ const SECTIONS: { heading: string; items: ContentItem[] }[] = [
     ],
   },
   {
-    heading: 'More',
+    heading: 'სხვა',
     items: [
       {
         type: 'add_section',
-        label: 'Add Section',
-        description: 'New top-level module',
+        label: 'სექციის დამატება',
+        description: 'ახალი მოდული',
         icon: FolderPlus,
         iconColor: 'text-gray-600',
         iconBg: 'bg-gray-100',
       },
       {
         type: 'clone_section',
-        label: 'Clone Section',
-        description: 'Duplicate an existing section',
+        label: 'სექციის დუბლირება',
+        description: 'სექციის კოპირება',
         icon: Copy,
         iconColor: 'text-gray-500',
         iconBg: 'bg-gray-100',
@@ -146,7 +146,7 @@ export function AddContentDropdown({ onAddSection, onSelectType, hasModules }: A
         )}
       >
         <Plus size={15} className={cn('transition-transform duration-200', open && 'rotate-45')} />
-        Add Content
+        კონტენტის დამატება
         <ChevronDown size={13} className={cn('transition-transform duration-200 opacity-70', open && 'rotate-180')} />
       </button>
 

@@ -1,4 +1,4 @@
-﻿import { notFound, redirect } from 'next/navigation';
+import { notFound, redirect } from 'next/navigation';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/server';
 import { canManageCourses } from '@/lib/auth/permissions';
@@ -7,15 +7,16 @@ import { CourseTabs } from './tabs';
 import { QuizSection } from './quiz-section';
 import { EnrolleesSection } from './enrollees-section';
 import { ModuleBuilder } from './module-builder';
+import { PublishButton } from './publish-button';
 import {
-  ArrowLeft, Clock, Users, BookOpen, HelpCircle, Award,
+  ArrowLeft, Clock, Users, BookOpen, HelpCircle,
   ShieldCheck, BarChart2, Calendar, GraduationCap,
-  CheckCircle2, PlayCircle, Target, Layers, Pencil,
+  CheckCircle2, Target, Layers, FileBox, AlertCircle,
 } from 'lucide-react';
 import { formatDate, formatDuration } from '@/lib/utils';
 import type { UserRoleAssignment } from '@/types';
 
-/* â”€â”€ helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ── helpers ──────────────────────────────────────────────────────── */
 const GRADIENTS = [
   'from-indigo-600 to-purple-700',
   'from-blue-600 to-indigo-700',
@@ -25,7 +26,7 @@ const GRADIENTS = [
   'from-blue-700 to-violet-700',
 ];
 const DIFF_LABEL: Record<string, string> = {
-  beginner: 'áƒ“áƒáƒ›áƒ¬áƒ§áƒ”áƒ‘áƒ˜', intermediate: 'áƒ¡áƒáƒ¨áƒ£áƒáƒšáƒ', advanced: 'áƒ›áƒáƒ¬áƒ˜áƒœáƒáƒ•áƒ”',
+  beginner: 'დამწყები', intermediate: 'საშუალო', advanced: 'მოწინავე',
 };
 const DIFF_COLOR: Record<string, string> = {
   beginner:     'bg-emerald-100/80 text-emerald-700',
@@ -43,10 +44,10 @@ interface Props {
   searchParams: Promise<{ tab?: string }>;
 }
 
-export default async function CourseDetailPage({ params, searchParams }: Props) {
+export default async function CourseBuilderPage({ params, searchParams }: Props) {
   const { id }  = await params;
   const { tab } = await searchParams;
-  const active  = tab ?? 'overview';
+  const active  = tab ?? 'content';
 
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -60,13 +61,11 @@ export default async function CourseDetailPage({ params, searchParams }: Props) 
   const [
     { data: course },
     { data: quizzes },
-    { data: enrollment },
     { data: enrollments },
     { data: rawModules, error: modulesError },
   ] = await Promise.all([
     supabase.from('courses').select('*').eq('id', id).single(),
     supabase.from('quizzes').select('*, quiz_questions(count)').eq('course_id', id),
-    supabase.from('course_enrollments').select('*').eq('course_id', id).eq('user_id', user.id).maybeSingle(),
     supabase.from('course_enrollments').select('*').eq('course_id', id),
     supabase.from('course_modules')
       .select('*, course_lessons(*)')
@@ -83,54 +82,42 @@ export default async function CourseDetailPage({ params, searchParams }: Props) 
   const enrollCount  = enrollments?.length ?? 0;
   const isMandatory  = course.is_mandatory ?? false;
   const gradient     = hashGradient(id);
-
-  // enrollment progress (using lesson_progress for hero card if enrolled)
-  const { data: flatLessons } = await supabase.from('lessons').select('id').eq('course_id', id);
-  const lessonIds = flatLessons?.map((l: any) => l.id) ?? [];
-  const { data: lessonProgress } = lessonIds.length
-    ? await supabase.from('lesson_progress').select('*').eq('user_id', user.id).in('lesson_id', lessonIds)
-    : { data: [] };
-  const completedLessons = lessonProgress?.filter((lp: any) => lp.completed_at).length ?? 0;
-  const progressPct = lessonIds.length > 0 ? Math.round((completedLessons / lessonIds.length) * 100) : 0;
-
-  // completion breakdown
-  const breakdown = {
-    completed:   enrollments?.filter((e: any) => e.status === 'completed').length ?? 0,
-    in_progress: enrollments?.filter((e: any) => e.status === 'in_progress').length ?? 0,
-    not_started: enrollments?.filter((e: any) => e.status === 'not_started').length ?? 0,
-  };
+  const needsMigration = modulesError?.message?.includes('does not exist');
 
   const tabs = [
-    { key: 'overview', label: 'áƒ›áƒ˜áƒ›áƒáƒ®áƒ˜áƒšáƒ•áƒ' },
-    { key: 'modules',  label: 'áƒ›áƒáƒ“áƒ£áƒšáƒ”áƒ‘áƒ˜',   count: totalModules },
-    { key: 'quizzes',  label: 'áƒ™áƒ˜áƒ—áƒ®áƒ•áƒáƒ áƒ”áƒ‘áƒ˜', count: quizzes?.length ?? 0 },
-    ...(canManage ? [{ key: 'progress', label: 'áƒžáƒ áƒáƒ’áƒ áƒ”áƒ¡áƒ˜', count: enrollCount }] : []),
+    { key: 'content',  label: 'კონტენტი',  count: totalModules },
+    { key: 'overview', label: 'მიმოხილვა' },
+    { key: 'files',    label: 'ფაილები' },
+    { key: 'quizzes',  label: 'ქვიზები',   count: quizzes?.length ?? 0 },
+    ...(canManage ? [{ key: 'progress', label: 'პროგრესი', count: enrollCount }] : []),
   ];
-
-  const needsMigration = modulesError?.message?.includes('does not exist');
 
   return (
     <div className="min-h-screen bg-gray-50/50">
 
-      {/* â•â• HERO â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */}
+      {/* ── Hero / Builder header ─────────────────────────────────── */}
       <div className={`bg-gradient-to-br ${gradient}`}>
-        <div className="max-w-7xl mx-auto px-6 pt-5 pb-12">
+        <div className="max-w-7xl mx-auto px-6 pt-5 pb-8">
 
-          {/* Breadcrumb */}
-          <div className="flex items-center justify-between mb-8">
-            <Link href="/dashboard/learning/courses"
-              className="flex items-center gap-2 text-white/60 hover:text-white text-sm transition-colors group">
+          {/* Breadcrumb + publish */}
+          <div className="flex items-center justify-between mb-6">
+            <Link
+              href="/dashboard/learning/courses"
+              className="flex items-center gap-2 text-white/60 hover:text-white text-sm transition-colors group"
+            >
               <ArrowLeft size={15} className="group-hover:-translate-x-0.5 transition-transform" />
-              áƒ™áƒ£áƒ áƒ¡áƒ”áƒ‘áƒ˜áƒ¡ áƒ‘áƒ˜áƒ‘áƒšáƒ˜áƒáƒ—áƒ”áƒ™áƒ
+              კურსების სია
             </Link>
+            {canManage && (
+              <PublishButton courseId={id} currentStatus={course.status} />
+            )}
           </div>
 
-          {/* Main hero content */}
-          <div className="flex flex-col lg:flex-row lg:items-start gap-8">
+          {/* Course identity */}
+          <div className="flex flex-col sm:flex-row sm:items-start gap-5">
             <div className="flex-1 min-w-0">
-
               {/* Badges */}
-              <div className="flex flex-wrap items-center gap-2 mb-4">
+              <div className="flex flex-wrap items-center gap-2 mb-3">
                 <StatusBadge status={course.status} />
                 {course.category && (
                   <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-white/15 text-white backdrop-blur-sm border border-white/20">
@@ -144,240 +131,158 @@ export default async function CourseDetailPage({ params, searchParams }: Props) 
                 )}
                 {isMandatory && (
                   <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-rose-500/70 text-white border border-rose-300/30">
-                    <ShieldCheck size={11} />áƒ¡áƒáƒ•áƒáƒšáƒ“áƒ”áƒ‘áƒ£áƒšáƒ
+                    <ShieldCheck size={11} />სავალდებულო
                   </span>
                 )}
               </div>
 
-              {/* Title */}
-              <h1 className="text-2xl lg:text-3xl font-bold text-white leading-tight mb-3">
+              <h1 className="text-xl lg:text-2xl font-bold text-white leading-tight mb-2">
                 {course.title}
               </h1>
-
-              {/* Description */}
               {course.description && (
-                <p className="text-white/75 text-sm leading-relaxed max-w-2xl mb-6">
+                <p className="text-white/70 text-sm leading-relaxed max-w-2xl">
                   {course.description}
                 </p>
               )}
-
-              {/* Stats pills */}
-              <div className="flex flex-wrap items-center gap-5">
-                {[
-                  { icon: Clock,       val: formatDuration(course.estimated_duration_minutes ?? 0) },
-                  { icon: Layers,      val: `${totalModules} áƒ›áƒáƒ“. / ${totalLessons} áƒ’áƒáƒ™áƒ•.` },
-                  { icon: HelpCircle,  val: `${quizzes?.length ?? 0} áƒ™áƒ˜áƒ—áƒ®áƒ•áƒáƒ áƒ˜` },
-                  { icon: Users,       val: `${enrollCount} áƒ áƒ”áƒ’.` },
-                  ...(course.certificate_enabled ? [{ icon: Award, val: 'áƒ¡áƒ”áƒ áƒ¢áƒ˜áƒ¤áƒ˜áƒ™áƒáƒ¢áƒ˜' }] : []),
-                ].map(({ icon: Icon, val }) => (
-                  <span key={val} className="flex items-center gap-1.5 text-sm text-white/70">
-                    <Icon size={14} className="text-white/50" />{val}
-                  </span>
-                ))}
-              </div>
             </div>
 
-            {/* Progress card */}
-            {enrollment ? (
-              <div className="bg-white/10 backdrop-blur-md rounded-2xl border border-white/20 p-6 lg:w-72 flex-shrink-0">
-                <div className="flex items-center justify-between mb-4">
-                  <p className="text-sm font-semibold text-white">áƒ—áƒ¥áƒ•áƒ”áƒœáƒ˜ áƒžáƒ áƒáƒ’áƒ áƒ”áƒ¡áƒ˜</p>
-                  {enrollment.status === 'completed' && <CheckCircle2 size={18} className="text-green-300" />}
-                  {enrollment.status === 'in_progress' && <PlayCircle size={18} className="text-white/60" />}
-                </div>
-                <div className="flex items-center gap-4 mb-4">
-                  <div className="relative w-16 h-16 flex-shrink-0">
-                    <svg className="w-16 h-16 -rotate-90" viewBox="0 0 64 64">
-                      <circle cx="32" cy="32" r="26" fill="none" stroke="white" strokeOpacity="0.15" strokeWidth="6"/>
-                      <circle cx="32" cy="32" r="26" fill="none"
-                        stroke={progressPct === 100 ? '#86efac' : 'white'}
-                        strokeOpacity="0.9" strokeWidth="6" strokeLinecap="round"
-                        strokeDasharray={`${2 * Math.PI * 26}`}
-                        strokeDashoffset={`${2 * Math.PI * 26 * (1 - progressPct / 100)}`}
-                        className="transition-all duration-700"
-                      />
-                    </svg>
-                    <span className="absolute inset-0 flex items-center justify-center text-sm font-bold text-white">
-                      {progressPct}%
-                    </span>
-                  </div>
-                  <div>
-                    <p className="text-white text-sm font-medium">{completedLessons}/{lessonIds.length}</p>
-                    <p className="text-white/60 text-xs">áƒ’áƒáƒ™áƒ•áƒ”áƒ—áƒ˜áƒšáƒ˜</p>
-                    {enrollment.due_date && (
-                      <p className="text-white/50 text-xs mt-1 flex items-center gap-1">
-                        <Calendar size={10} />áƒ•áƒáƒ“áƒ: {formatDate(enrollment.due_date)}
-                      </p>
-                    )}
-                  </div>
-                </div>
-                <div className="h-px bg-white/10 mb-4" />
-                <p className="text-xs text-white/60">
-                  áƒ¡áƒ¢áƒáƒ¢áƒ£áƒ¡áƒ˜:{' '}
-                  <span className="text-white font-medium">
-                    {({ not_started: 'áƒáƒ  áƒ“áƒáƒ¬áƒ§áƒ”áƒ‘áƒ£áƒšáƒ', in_progress: 'áƒ›áƒ˜áƒ›áƒ“áƒ˜áƒœáƒáƒ áƒ”áƒ', completed: 'áƒ“áƒáƒ¡áƒ áƒ£áƒšáƒ”áƒ‘áƒ£áƒšáƒ˜áƒ', overdue: 'áƒ•áƒáƒ“áƒáƒ’áƒáƒ“áƒáƒªáƒ˜áƒšáƒ”áƒ‘áƒ£áƒšáƒ˜' } as Record<string,string>)[enrollment.status] ?? enrollment.status}
-                  </span>
-                </p>
-              </div>
-            ) : (
-              <div className="bg-white/10 backdrop-blur-md rounded-2xl border border-white/20 p-6 lg:w-72 flex-shrink-0 text-center">
-                <div className="w-12 h-12 rounded-2xl bg-white/10 flex items-center justify-center mx-auto mb-3">
-                  <GraduationCap size={22} className="text-white/60" />
-                </div>
-                <p className="text-sm font-medium text-white mb-1">áƒ™áƒ£áƒ áƒ¡áƒ–áƒ” áƒžáƒ áƒáƒ’áƒ áƒ”áƒ¡áƒ˜</p>
-                <p className="text-xs text-white/60">áƒáƒ“áƒ›áƒ˜áƒœáƒ˜áƒ¡ áƒ›áƒ˜áƒ”áƒ  áƒ™áƒ£áƒ áƒ¡áƒ–áƒ” áƒ“áƒáƒ áƒ”áƒ’áƒ˜áƒ¡áƒ¢áƒ áƒ˜áƒ áƒ”áƒ‘áƒ˜áƒ¡ áƒ¨áƒ”áƒ›áƒ“áƒ”áƒ’.</p>
-              </div>
-            )}
+            {/* Stats strip */}
+            <div className="flex flex-wrap items-center gap-4 sm:gap-5 sm:flex-col sm:items-end text-right">
+              {[
+                { icon: Layers,     val: `${totalModules} სექცია` },
+                { icon: BookOpen,   val: `${totalLessons} გაკვ.` },
+                { icon: Users,      val: `${enrollCount} მონაწ.` },
+                { icon: Clock,      val: formatDuration(course.estimated_duration_minutes ?? 0) },
+              ].map(({ icon: Icon, val }) => (
+                <span key={val} className="flex items-center gap-1.5 text-sm text-white/70">
+                  <Icon size={13} className="text-white/50" />{val}
+                </span>
+              ))}
+            </div>
           </div>
         </div>
       </div>
 
-      {/* â•â• CONTENT â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */}
+      {/* ── Builder body ──────────────────────────────────────────── */}
       <div className="max-w-7xl mx-auto px-6 py-6">
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
 
-          {/* â”€â”€ Main column â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
-          <div className="lg:col-span-2 space-y-5">
-
-            {/* Migration warning */}
-            {needsMigration && (
-              <div className="p-4 bg-amber-50 border border-amber-200 rounded-2xl text-sm text-amber-800">
-                <p className="font-semibold mb-1">áƒ’áƒáƒ£áƒ¨áƒ•áƒ”áƒ— SQL áƒ›áƒ˜áƒ’áƒ áƒáƒªáƒ˜áƒ</p>
-                <p className="text-xs text-amber-700 mb-2">Supabase SQL Editor-áƒ¨áƒ˜ áƒ’áƒáƒ£áƒ¨áƒ•áƒ”áƒ— <code className="bg-amber-100 px-1 rounded">supabase/migrations/004_course_modules.sql</code></p>
-              </div>
-            )}
-
-            {/* Tab panel */}
-            <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
-              <div className="px-6 border-b border-gray-100">
-                <CourseTabs tabs={tabs} current={active} />
-              </div>
-
-              <div className="p-6">
-
-                {/* â”€ Overview â”€ */}
-                {active === 'overview' && (
-                  <div className="space-y-6">
-                    {course.description && (
-                      <div>
-                        <h3 className="text-sm font-semibold text-gray-900 mb-2">áƒ™áƒ£áƒ áƒ¡áƒ˜áƒ¡ áƒ¨áƒ”áƒ¡áƒáƒ®áƒ”áƒ‘</h3>
-                        <p className="text-sm text-gray-600 leading-relaxed">{course.description}</p>
-                      </div>
-                    )}
-                    <div>
-                      <h3 className="text-sm font-semibold text-gray-900 mb-3">áƒ“áƒ”áƒ¢áƒáƒšáƒ”áƒ‘áƒ˜</h3>
-                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                        {[
-                          { icon: BarChart2,  label: 'áƒ¡áƒ˜áƒ áƒ—áƒ£áƒšáƒ”',      val: DIFF_LABEL[course.difficulty] ?? course.difficulty ?? 'â€”' },
-                          { icon: Clock,      label: 'áƒ®áƒáƒœáƒ’áƒ áƒ«áƒšáƒ˜áƒ•áƒáƒ‘áƒ', val: formatDuration(course.estimated_duration_minutes ?? 0) },
-                          { icon: Target,     label: 'áƒ’áƒáƒ›áƒ¡áƒ•áƒšáƒ”áƒšáƒ˜',    val: `${course.passing_score ?? 70}%` },
-                          { icon: Layers,     label: 'áƒ›áƒáƒ“áƒ£áƒšáƒ”áƒ‘áƒ˜',     val: totalModules },
-                          { icon: Calendar,   label: 'áƒ¨áƒ”áƒ˜áƒ¥áƒ›áƒœáƒ',      val: formatDate(course.created_at) },
-                          ...(course.published_at
-                            ? [{ icon: CheckCircle2, label: 'áƒ’áƒáƒ›áƒáƒ¥áƒ•áƒ”áƒ§áƒœáƒ“áƒ', val: formatDate(course.published_at) }]
-                            : []),
-                        ].map(({ icon: Icon, label, val }) => (
-                          <div key={label} className="flex items-center gap-3 p-3.5 bg-gray-50 rounded-xl">
-                            <div className="w-8 h-8 rounded-lg bg-white border border-gray-200 flex items-center justify-center flex-shrink-0 shadow-sm">
-                              <Icon size={14} className="text-indigo-500" />
-                            </div>
-                            <div className="min-w-0">
-                              <p className="text-[10px] font-medium text-gray-400 uppercase tracking-wide">{label}</p>
-                              <p className="text-sm font-semibold text-gray-900 truncate">{val}</p>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* â”€ Modules & Lessons â”€ */}
-                {active === 'modules' && (
-                  <ModuleBuilder
-                    initialModules={modules as any}
-                    courseId={id}
-                    canManage={canManage}
-                  />
-                )}
-
-                {/* â”€ Quizzes â”€ */}
-                {active === 'quizzes' && (
-                  <QuizSection quizzes={quizzes ?? []} courseId={id} canManage={canManage} />
-                )}
-
-                {/* â”€ Progress / Enrollees â”€ */}
-                {active === 'progress' && canManage && (
-                  <EnrolleesSection courseId={id} />
-                )}
-              </div>
+        {needsMigration && (
+          <div className="flex items-start gap-3 p-4 bg-amber-50 border border-amber-200 rounded-2xl text-sm text-amber-800 mb-5">
+            <AlertCircle size={16} className="flex-shrink-0 mt-0.5 text-amber-500" />
+            <div>
+              <p className="font-semibold mb-1">გაუშვეთ SQL მიგრაცია</p>
+              <p className="text-xs text-amber-700">
+                Supabase SQL Editor-ში გაუშვეთ{' '}
+                <code className="bg-amber-100 px-1 rounded">supabase/migrations/004_course_modules.sql</code>
+              </p>
             </div>
           </div>
+        )}
 
-          {/* â”€â”€ Sidebar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
-          <div className="space-y-4">
+        <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+          {/* Tabs */}
+          <div className="px-6 border-b border-gray-100">
+            <CourseTabs tabs={tabs} current={active} />
+          </div>
 
-            {/* Course stats */}
-            <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
-              <div className="px-5 py-4 border-b border-gray-100">
-                <h3 className="text-sm font-semibold text-gray-900">áƒ™áƒ£áƒ áƒ¡áƒ˜áƒ¡ áƒ¡áƒ¢áƒáƒ¢áƒ˜áƒ¡áƒ¢áƒ˜áƒ™áƒ</h3>
-              </div>
-              <div className="divide-y divide-gray-100">
-                {[
-                  { icon: Layers,     label: 'áƒ›áƒáƒ“áƒ£áƒšáƒ”áƒ‘áƒ˜',      val: totalModules },
-                  { icon: BookOpen,   label: 'áƒ’áƒáƒ™áƒ•áƒ”áƒ—áƒ˜áƒšáƒ”áƒ‘áƒ˜',   val: totalLessons },
-                  { icon: HelpCircle, label: 'áƒ™áƒ˜áƒ—áƒ®áƒ•áƒáƒ áƒ”áƒ‘áƒ˜',    val: quizzes?.length ?? 0 },
-                  { icon: Users,      label: 'áƒ áƒ”áƒ’áƒ˜áƒ¡áƒ¢áƒ áƒáƒœáƒ¢áƒ”áƒ‘áƒ˜', val: enrollCount },
-                  { icon: Clock,      label: 'áƒ®áƒáƒœáƒ’áƒ áƒ«áƒšáƒ˜áƒ•áƒáƒ‘áƒ',  val: formatDuration(course.estimated_duration_minutes ?? 0) },
-                  { icon: Target,     label: 'áƒ’áƒáƒ›áƒ¡áƒ•áƒšáƒ”áƒšáƒ˜ áƒ¥áƒ£áƒšáƒ',val: `${course.passing_score ?? 70}%` },
-                ].map(({ icon: Icon, label, val }) => (
-                  <div key={label} className="flex items-center justify-between px-5 py-3">
-                    <span className="flex items-center gap-2.5 text-sm text-gray-500">
-                      <Icon size={14} className="text-indigo-400" />{label}
-                    </span>
-                    <span className="text-sm font-semibold text-gray-900">{val}</span>
+          <div className="p-6">
+
+            {/* ── Content tab (module builder) ──────────────────── */}
+            {active === 'content' && (
+              <ModuleBuilder
+                initialModules={modules as any}
+                courseId={id}
+                canManage={canManage}
+              />
+            )}
+
+            {/* ── Overview tab ──────────────────────────────────── */}
+            {active === 'overview' && (
+              <div className="space-y-6">
+                {course.description && (
+                  <div>
+                    <h3 className="text-sm font-semibold text-gray-900 mb-2">კურსის შესახებ</h3>
+                    <p className="text-sm text-gray-600 leading-relaxed">{course.description}</p>
                   </div>
-                ))}
-              </div>
-            </div>
+                )}
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-900 mb-3">დეტალები</h3>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                    {[
+                      { icon: BarChart2,    label: 'სირთულე',      val: DIFF_LABEL[course.difficulty] ?? course.difficulty ?? '—' },
+                      { icon: Clock,        label: 'ხანგრძლივობა', val: formatDuration(course.estimated_duration_minutes ?? 0) },
+                      { icon: Target,       label: 'გამსვლელი',    val: `${course.passing_score ?? 70}%` },
+                      { icon: Layers,       label: 'სექციები',     val: totalModules },
+                      { icon: BookOpen,     label: 'გაკვეთილები',  val: totalLessons },
+                      { icon: Calendar,     label: 'შეიქმნა',      val: formatDate(course.created_at) },
+                      ...(course.published_at
+                        ? [{ icon: CheckCircle2, label: 'გამოქვეყნდა', val: formatDate(course.published_at) }]
+                        : []),
+                    ].map(({ icon: Icon, label, val }) => (
+                      <div key={label} className="flex items-center gap-3 p-3.5 bg-gray-50 rounded-xl">
+                        <div className="w-8 h-8 rounded-lg bg-white border border-gray-200 flex items-center justify-center flex-shrink-0 shadow-sm">
+                          <Icon size={14} className="text-indigo-500" />
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-[10px] font-medium text-gray-400 uppercase tracking-wide">{label}</p>
+                          <p className="text-sm font-semibold text-gray-900 truncate">{val}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
 
-            {/* Completion breakdown */}
-            {enrollCount > 0 && (
-              <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-5">
-                <h3 className="text-sm font-semibold text-gray-900 mb-4">áƒ“áƒáƒ¡áƒ áƒ£áƒšáƒ”áƒ‘áƒ˜áƒ¡ áƒ›áƒáƒ©áƒ•áƒ”áƒœáƒ”áƒ‘áƒ”áƒšáƒ˜</h3>
-                {[
-                  { label: 'áƒ“áƒáƒ¡áƒ áƒ£áƒšáƒ”áƒ‘áƒ£áƒšáƒ˜',  count: breakdown.completed,   color: 'bg-emerald-500' },
-                  { label: 'áƒ›áƒ˜áƒ›áƒ“áƒ˜áƒœáƒáƒ áƒ”',    count: breakdown.in_progress, color: 'bg-indigo-500' },
-                  { label: 'áƒáƒ  áƒ“áƒáƒ¬áƒ§áƒ”áƒ‘áƒ£áƒšáƒ', count: breakdown.not_started, color: 'bg-gray-300' },
-                ].map(({ label, count, color }) => {
-                  const pct = enrollCount > 0 ? Math.round((count / enrollCount) * 100) : 0;
-                  return (
-                    <div key={label} className="mb-3.5 last:mb-0">
-                      <div className="flex items-center justify-between mb-1.5">
-                        <span className="text-xs text-gray-500">{label}</span>
-                        <span className="text-xs font-semibold text-gray-900">{count} <span className="text-gray-400 font-normal">({pct}%)</span></span>
-                      </div>
-                      <div className="w-full bg-gray-100 rounded-full h-2 overflow-hidden">
-                        <div className={`h-full rounded-full ${color} transition-all duration-700`}
-                          style={{ width: `${pct}%` }} />
-                      </div>
-                    </div>
-                  );
-                })}
+                {/* Completion breakdown */}
+                {enrollCount > 0 && (
+                  <div>
+                    <h3 className="text-sm font-semibold text-gray-900 mb-3">დასრულების მაჩვენებელი</h3>
+                    {[
+                      { label: 'დასრულებული',  count: enrollments?.filter((e: any) => e.status === 'completed').length ?? 0,   color: 'bg-emerald-500' },
+                      { label: 'მიმდინარე',    count: enrollments?.filter((e: any) => e.status === 'in_progress').length ?? 0,  color: 'bg-indigo-500' },
+                      { label: 'არ დაწყებული', count: enrollments?.filter((e: any) => e.status === 'not_started').length ?? 0, color: 'bg-gray-300' },
+                    ].map(({ label, count, color }) => {
+                      const pct = enrollCount > 0 ? Math.round((count / enrollCount) * 100) : 0;
+                      return (
+                        <div key={label} className="mb-3.5 last:mb-0">
+                          <div className="flex items-center justify-between mb-1.5">
+                            <span className="text-xs text-gray-500">{label}</span>
+                            <span className="text-xs font-semibold text-gray-900">
+                              {count} <span className="text-gray-400 font-normal">({pct}%)</span>
+                            </span>
+                          </div>
+                          <div className="w-full bg-gray-100 rounded-full h-2 overflow-hidden">
+                            <div className={`h-full rounded-full ${color} transition-all duration-700`} style={{ width: `${pct}%` }} />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             )}
 
-            {/* Certificate badge */}
-            {course.certificate_enabled && (
-              <div className="bg-gradient-to-br from-amber-50 to-orange-50 rounded-2xl border border-amber-200 p-5 flex items-center gap-4">
-                <div className="w-10 h-10 rounded-xl bg-amber-100 flex items-center justify-center flex-shrink-0">
-                  <Award size={20} className="text-amber-600" />
+            {/* ── Files tab ─────────────────────────────────────── */}
+            {active === 'files' && (
+              <div className="flex flex-col items-center justify-center py-20 text-center">
+                <div className="w-14 h-14 rounded-2xl bg-gray-100 flex items-center justify-center mb-4">
+                  <FileBox size={26} className="text-gray-300" />
                 </div>
-                <div>
-                  <p className="text-sm font-semibold text-amber-900">áƒ¡áƒ”áƒ áƒ¢áƒ˜áƒ¤áƒ˜áƒ™áƒáƒ¢áƒ˜</p>
-                  <p className="text-xs text-amber-700 mt-0.5">áƒ™áƒ£áƒ áƒ¡áƒ˜áƒ¡ áƒ“áƒáƒ¡áƒ áƒ£áƒšáƒ”áƒ‘áƒ˜áƒ¡áƒáƒ¡ áƒ’áƒáƒ˜áƒªáƒ”áƒ›áƒ</p>
-                </div>
+                <p className="text-sm font-semibold text-gray-600 mb-1">ფაილები</p>
+                <p className="text-xs text-gray-400 max-w-xs">
+                  კურსის დოკუმენტები, სლაიდები და დამხმარე მასალები.<br />
+                  ფუნქცია მალე დაემატება.
+                </p>
               </div>
+            )}
+
+            {/* ── Quizzes tab ───────────────────────────────────── */}
+            {active === 'quizzes' && (
+              <QuizSection quizzes={quizzes ?? []} courseId={id} canManage={canManage} />
+            )}
+
+            {/* ── Progress tab ──────────────────────────────────── */}
+            {active === 'progress' && canManage && (
+              <EnrolleesSection courseId={id} />
             )}
           </div>
         </div>
@@ -385,4 +290,3 @@ export default async function CourseDetailPage({ params, searchParams }: Props) 
     </div>
   );
 }
-
