@@ -278,7 +278,7 @@ export function LessonPlayer({
               )}
               {isCompleted && (
                 <div className="flex items-center gap-2 p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-sm text-emerald-700 font-medium">
-                  <CheckCircle2 size={15} />დასდასტურებელია
+                  <CheckCircle2 size={15} />დადასტურებულია
                 </div>
               )}
             </div>
