@@ -4,11 +4,11 @@ import { createClient } from '@/lib/supabase/client';
 import {
   ChevronDown, ChevronRight, Plus, Pencil, Trash2,
   FileText, Video, File, HelpCircle, CheckSquare, ClipboardList,
-  AlertCircle, Layers, GripVertical, BookOpen, ExternalLink, PlayCircle,
+  AlertCircle, Layers, BookOpen, ExternalLink, PlayCircle,
 } from 'lucide-react';
 
 /* ── Types ─────────────────────────────────────────────────────────── */
-interface CLessson {
+interface CLesson {
   id: string;
   module_id: string;
   title: string;
@@ -26,7 +26,7 @@ interface CModule {
   title: string;
   description: string | null;
   sort_order: number;
-  course_lessons: CLessson[];
+  course_lessons: CLesson[];
 }
 interface Props {
   initialModules: CModule[];
@@ -61,7 +61,7 @@ const Spinner = () => (
 export function ModuleBuilder({ initialModules, courseId, canManage }: Props) {
   const [modules, setModules]           = useState<CModule[]>(initialModules);
   const [expanded, setExpanded]         = useState<Set<string>>(new Set(initialModules.map(m => m.id)));
-  const [selectedLesson, setSelectedLesson] = useState<CLessson | null>(null);
+  const [selectedLesson, setSelectedLesson] = useState<CLesson | null>(null);
   const [loading, setLoading]           = useState(false);
   const [error, setError]               = useState('');
   const [deleting, setDeleting]         = useState<string | null>(null);
@@ -70,7 +70,7 @@ export function ModuleBuilder({ initialModules, courseId, canManage }: Props) {
   const [modModal, setModModal] = useState<{ open: boolean; mode: 'add' | 'edit'; mod?: CModule }>({ open: false, mode: 'add' });
   const [modForm, setModForm]   = useState(MOD_DEF);
 
-  const [lesModal, setLesModal] = useState<{ open: boolean; mode: 'add' | 'edit'; moduleId?: string; lesson?: CLessson }>({ open: false, mode: 'add' });
+  const [lesModal, setLesModal] = useState<{ open: boolean; mode: 'add' | 'edit'; moduleId?: string; lesson?: CLesson }>({ open: false, mode: 'add' });
   const [lesForm, setLesForm]   = useState(LES_DEF);
 
   /* ── Reload ──────────────────────────────────────────────────────── */
@@ -145,7 +145,7 @@ export function ModuleBuilder({ initialModules, courseId, canManage }: Props) {
     setError('');
     setLesModal({ open: true, mode: 'add', moduleId });
   };
-  const openEditLesson = (lesson: CLessson) => {
+  const openEditLesson = (lesson: CLesson) => {
     setLesForm({
       title: lesson.title, lesson_type: lesson.lesson_type,
       content: lesson.content ?? '', video_url: lesson.video_url ?? '',
@@ -180,7 +180,7 @@ export function ModuleBuilder({ initialModules, courseId, canManage }: Props) {
       if (insertErr) { setError(insertErr.message); return; }
       const capturedModuleId = lesModal.moduleId!;
       setLesModal({ open: false, mode: 'add' });
-      const newLesson = inserted as CLessson;
+      const newLesson = inserted as CLesson;
       setModules(prev => prev.map(m =>
         m.id === capturedModuleId ? { ...m, course_lessons: [...m.course_lessons, newLesson] } : m
       ));
@@ -202,7 +202,7 @@ export function ModuleBuilder({ initialModules, courseId, canManage }: Props) {
 
       setLoading(false);
       if (updateErr) { setError(updateErr.message); return; }
-      const updatedLesson: CLessson = { ...lesModal.lesson, ...lesForm, title: lesForm.title.trim() };
+      const updatedLesson: CLesson = { ...lesModal.lesson, ...lesForm, title: lesForm.title.trim() };
       const capturedModuleId = lesModal.moduleId!;
       setLesModal({ open: false, mode: 'add' });
       setModules(prev => prev.map(m =>

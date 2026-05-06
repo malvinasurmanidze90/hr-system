@@ -72,8 +72,11 @@ export default async function PortalPage() {
             {enrollments?.map((enrollment: any) => {
               const course = enrollment.course;
               if (!course) return null;
+              const pct = enrollment.progress_percentage ?? (
+                enrollment.status === 'completed' ? 100 : enrollment.status === 'in_progress' ? 50 : 0
+              );
               return (
-                <Link key={enrollment.id} href={`/dashboard/lms/courses/${course.id}`}>
+                <Link key={enrollment.id} href={`/dashboard/learning/courses/${course.id}/learn`}>
                   <div className="group bg-white rounded-2xl border border-gray-200 shadow-sm hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200 p-4 cursor-pointer">
                     <div className="flex items-center gap-4">
                       <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-indigo-400 to-violet-500 flex items-center justify-center flex-shrink-0 shadow-sm">
@@ -91,10 +94,7 @@ export default async function PortalPage() {
                           </p>
                         )}
                         <div className="mt-2">
-                          <Progress
-                            value={enrollment.status === 'completed' ? 100 : enrollment.status === 'in_progress' ? 50 : 0}
-                            size="sm"
-                          />
+                          <Progress value={pct} size="sm" />
                         </div>
                       </div>
                     </div>

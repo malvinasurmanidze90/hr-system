@@ -55,7 +55,7 @@ export function canManageUsers(roles: UserRoleAssignment[]): boolean {
 }
 
 export function canManageCourses(roles: UserRoleAssignment[]): boolean {
-  return hasAnyRole(roles, ['tenant_super_admin', 'super_admin', 'hr_admin']);
+  return hasAnyRole(roles, ['platform_super_admin', 'tenant_super_admin', 'super_admin', 'ceo', 'hr_admin']);
 }
 
 export function canViewReports(roles: UserRoleAssignment[]): boolean {

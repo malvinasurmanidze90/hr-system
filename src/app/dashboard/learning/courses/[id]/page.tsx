@@ -102,7 +102,7 @@ export default async function CourseBuilderPage({ params, searchParams }: Props)
       <div className={`bg-gradient-to-br ${gradient}`}>
         <div className="max-w-7xl mx-auto px-6 pt-5 pb-8">
 
-          {/* Breadcrumb + publish */}
+          {/* Breadcrumb + actions */}
           <div className="flex items-center justify-between mb-6">
             <Link
               href="/dashboard/learning/courses"
@@ -111,9 +111,19 @@ export default async function CourseBuilderPage({ params, searchParams }: Props)
               <ArrowLeft size={15} className="group-hover:-translate-x-0.5 transition-transform" />
               კურსების სია
             </Link>
-            {canManage && (
-              <PublishButton courseId={id} currentStatus={course.status} />
-            )}
+            <div className="flex items-center gap-2">
+              {totalLessons > 0 && (
+                <Link
+                  href={`/dashboard/learning/courses/${id}/learn`}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white/80 hover:text-white bg-white/10 hover:bg-white/20 border border-white/20 rounded-lg transition-all"
+                >
+                  <GraduationCap size={13} />გადახედვა
+                </Link>
+              )}
+              {canManage && (
+                <PublishButton courseId={id} currentStatus={course.status} />
+              )}
+            </div>
           </div>
 
           {/* Course identity */}
