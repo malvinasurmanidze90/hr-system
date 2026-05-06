@@ -1,10 +1,12 @@
 'use client';
 import { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { createClient } from '@/lib/supabase/client';
 import {
   ChevronDown, ChevronRight, Plus, Pencil, Trash2,
   FileText, Video, File, HelpCircle, CheckSquare, ClipboardList,
   AlertCircle, Layers, BookOpen, ExternalLink, PlayCircle,
+  MoreVertical,
 } from 'lucide-react';
 
 /* ── Types ─────────────────────────────────────────────────────────── */
@@ -57,6 +59,54 @@ const Spinner = () => (
   </svg>
 );
 
+/* ── Portal dropdown ─────────────────────────────────────────────────
+   Renders into document.body so overflow:hidden/auto on any ancestor
+   cannot clip it. Position is derived from the trigger's DOMRect.
+   ─────────────────────────────────────────────────────────────────── */
+interface DDState { id: string; rect: DOMRect; }
+
+function PortalMenu({
+  dd, id, close, children, rightAlign = false,
+}: {
+  dd: DDState | null;
+  id: string;
+  close: () => void;
+  children: React.ReactNode;
+  rightAlign?: boolean;
+}) {
+  if (!dd || dd.id !== id) return null;
+
+  const { rect } = dd;
+  const spaceBelow = window.innerHeight - rect.bottom;
+  const goUp = spaceBelow < 260;
+
+  const style: React.CSSProperties = {
+    position: 'fixed',
+    zIndex: 9999,
+    minWidth: Math.max(rect.width, 160),
+    ...(rightAlign
+      ? { right: window.innerWidth - rect.right }
+      : { left: rect.left }),
+    ...(goUp
+      ? { bottom: window.innerHeight - rect.top + 4 }
+      : { top: rect.bottom + 4 }),
+  };
+
+  return createPortal(
+    <>
+      {/* click-away backdrop */}
+      <div className="fixed inset-0" style={{ zIndex: 9998 }} onClick={close} />
+      <div
+        className="bg-white border border-gray-200 rounded-xl shadow-xl overflow-hidden"
+        style={style}
+      >
+        {children}
+      </div>
+    </>,
+    document.body,
+  );
+}
+
 /* ── Component ─────────────────────────────────────────────────────── */
 export function ModuleBuilder({ initialModules, courseId, canManage }: Props) {
   const [modules, setModules]           = useState<CModule[]>(initialModules);
@@ -65,7 +115,16 @@ export function ModuleBuilder({ initialModules, courseId, canManage }: Props) {
   const [loading, setLoading]           = useState(false);
   const [error, setError]               = useState('');
   const [deleting, setDeleting]         = useState<string | null>(null);
-  const [openDropdown, setOpenDropdown] = useState<string | null>(null);
+
+  /* single dropdown state: which menu is open + its trigger rect */
+  const [dd, setDd] = useState<DDState | null>(null);
+
+  const openDD = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    setDd(prev => prev?.id === id ? null : { id, rect });
+  };
+  const closeDD = () => setDd(null);
 
   const [modModal, setModModal] = useState<{ open: boolean; mode: 'add' | 'edit'; mod?: CModule }>({ open: false, mode: 'add' });
   const [modForm, setModForm]   = useState(MOD_DEF);
@@ -130,7 +189,6 @@ export function ModuleBuilder({ initialModules, courseId, canManage }: Props) {
     setDeleting(null);
     if (delErr) { setError(delErr.message); return; }
     setModules(prev => prev.filter(m => m.id !== modId));
-    // Clear selection if the deleted module contained the selected lesson
     setSelectedLesson(prev => {
       if (!prev) return null;
       const mod = modules.find(m => m.id === modId);
@@ -140,7 +198,6 @@ export function ModuleBuilder({ initialModules, courseId, canManage }: Props) {
 
   /* ── Lesson CRUD ─────────────────────────────────────────────────── */
   const openAddLesson = (moduleId: string, lessonType = 'text') => {
-    setOpenDropdown(null);
     setLesForm({ ...LES_DEF, lesson_type: lessonType });
     setError('');
     setLesModal({ open: true, mode: 'add', moduleId });
@@ -172,7 +229,6 @@ export function ModuleBuilder({ initialModules, courseId, canManage }: Props) {
           content:     lesForm.content.trim() || null,
           video_url:   lesForm.video_url.trim() || null,
           file_url:    lesForm.file_url.trim() || null,
-          // TODO: add sort_order, duration_minutes, is_required columns later if needed
         })
         .select().single();
 
@@ -185,7 +241,7 @@ export function ModuleBuilder({ initialModules, courseId, canManage }: Props) {
         m.id === capturedModuleId ? { ...m, course_lessons: [...m.course_lessons, newLesson] } : m
       ));
       setExpanded(prev => new Set([...prev, capturedModuleId]));
-      setSelectedLesson(newLesson); // auto-select newly created lesson
+      setSelectedLesson(newLesson);
 
     } else if (lesModal.lesson) {
       const { error: updateErr } = await supabase
@@ -196,7 +252,6 @@ export function ModuleBuilder({ initialModules, courseId, canManage }: Props) {
           content:     lesForm.content.trim() || null,
           video_url:   lesForm.video_url.trim() || null,
           file_url:    lesForm.file_url.trim() || null,
-          // TODO: add duration_minutes, is_required columns later if needed
         })
         .eq('id', lesModal.lesson.id);
 
@@ -210,7 +265,6 @@ export function ModuleBuilder({ initialModules, courseId, canManage }: Props) {
           ? { ...m, course_lessons: m.course_lessons.map(l => l.id === updatedLesson.id ? updatedLesson : l) }
           : m
       ));
-      // Keep right panel in sync with edited lesson
       if (selectedLesson?.id === updatedLesson.id) setSelectedLesson(updatedLesson);
     }
   };
@@ -267,7 +321,6 @@ export function ModuleBuilder({ initialModules, courseId, canManage }: Props) {
 
     return (
       <div className="p-6 h-full overflow-y-auto">
-        {/* Lesson header */}
         <div className="flex items-start justify-between gap-4 mb-6">
           <div className="min-w-0 flex-1">
             <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold mb-3 ${tc.badgeColor}`}>
@@ -290,7 +343,6 @@ export function ModuleBuilder({ initialModules, courseId, canManage }: Props) {
 
         <div className="border-t border-gray-100 pt-5 space-y-5">
 
-          {/* ── Text ── */}
           {selectedLesson.lesson_type === 'text' && (
             selectedLesson.content?.trim() ? (
               <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">
@@ -304,7 +356,6 @@ export function ModuleBuilder({ initialModules, courseId, canManage }: Props) {
             )
           )}
 
-          {/* ── Acknowledgement ── */}
           {selectedLesson.lesson_type === 'acknowledgement' && (
             <div className="space-y-3">
               <div className="flex items-start gap-3 p-4 bg-green-50 border border-green-200 rounded-xl">
@@ -324,18 +375,13 @@ export function ModuleBuilder({ initialModules, courseId, canManage }: Props) {
             </div>
           )}
 
-          {/* ── Video ── */}
           {selectedLesson.lesson_type === 'video' && (
             selectedLesson.video_url ? (
               <div className="space-y-3">
                 <div className="flex items-center gap-2 p-3 bg-gray-50 rounded-xl text-sm">
                   <ExternalLink size={13} className="text-gray-400 flex-shrink-0" />
-                  <a
-                    href={selectedLesson.video_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-indigo-600 hover:underline truncate"
-                  >
+                  <a href={selectedLesson.video_url} target="_blank" rel="noopener noreferrer"
+                    className="text-indigo-600 hover:underline truncate">
                     {selectedLesson.video_url}
                   </a>
                 </div>
@@ -343,13 +389,9 @@ export function ModuleBuilder({ initialModules, courseId, canManage }: Props) {
                   const embedUrl = getYouTubeEmbed(selectedLesson.video_url);
                   return embedUrl ? (
                     <div className="aspect-video rounded-xl overflow-hidden border border-gray-200">
-                      <iframe
-                        src={embedUrl}
-                        title={selectedLesson.title}
-                        className="w-full h-full"
+                      <iframe src={embedUrl} title={selectedLesson.title} className="w-full h-full"
                         allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                        allowFullScreen
-                      />
+                        allowFullScreen />
                     </div>
                   ) : (
                     <div className="aspect-video bg-gray-900 rounded-xl flex flex-col items-center justify-center gap-3">
@@ -367,18 +409,13 @@ export function ModuleBuilder({ initialModules, courseId, canManage }: Props) {
             )
           )}
 
-          {/* ── PDF ── */}
           {selectedLesson.lesson_type === 'pdf' && (
             selectedLesson.file_url ? (
               <div className="space-y-3">
                 <div className="flex items-center gap-2 p-3 bg-gray-50 rounded-xl text-sm">
                   <File size={13} className="text-gray-400 flex-shrink-0" />
-                  <a
-                    href={selectedLesson.file_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-indigo-600 hover:underline truncate"
-                  >
+                  <a href={selectedLesson.file_url} target="_blank" rel="noopener noreferrer"
+                    className="text-indigo-600 hover:underline truncate">
                     {decodeURIComponent(selectedLesson.file_url.split('/').pop() ?? selectedLesson.file_url)}
                   </a>
                   <ExternalLink size={11} className="text-gray-300 flex-shrink-0 ml-auto" />
@@ -396,34 +433,26 @@ export function ModuleBuilder({ initialModules, courseId, canManage }: Props) {
             )
           )}
 
-          {/* ── Quiz ── */}
           {selectedLesson.lesson_type === 'quiz' && (
-            <div className="space-y-3">
-              <div className="flex items-start gap-3 p-4 bg-amber-50 border border-amber-200 rounded-xl">
-                <HelpCircle size={18} className="text-amber-500 flex-shrink-0 mt-0.5" />
-                <div>
-                  <p className="text-sm font-semibold text-amber-800 mb-0.5">ტესტი</p>
-                  <p className="text-xs text-amber-700 leading-relaxed">
-                    კითხვარის კონსტრუქტორი დაემატება შემდეგ ეტაპზე.
-                    ახლა გადადით „ქვიზები" ჩანართზე კვიზის პარამეტრების სამართავად.
-                  </p>
-                </div>
+            <div className="flex items-start gap-3 p-4 bg-amber-50 border border-amber-200 rounded-xl">
+              <HelpCircle size={18} className="text-amber-500 flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="text-sm font-semibold text-amber-800 mb-0.5">ტესტი</p>
+                <p className="text-xs text-amber-700 leading-relaxed">
+                  კითხვარის კონსტრუქტორი დაემატება შემდეგ ეტაპზე.
+                  ახლა გადადით „ქვიზები" ჩანართზე კვიზის პარამეტრების სამართავად.
+                </p>
               </div>
             </div>
           )}
 
-          {/* ── Assignment ── */}
           {selectedLesson.lesson_type === 'assignment' && (
             <div className="space-y-3">
               {selectedLesson.file_url && (
                 <div className="flex items-center gap-2 p-3 bg-gray-50 rounded-xl text-sm">
                   <File size={13} className="text-gray-400 flex-shrink-0" />
-                  <a
-                    href={selectedLesson.file_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-indigo-600 hover:underline truncate"
-                  >
+                  <a href={selectedLesson.file_url} target="_blank" rel="noopener noreferrer"
+                    className="text-indigo-600 hover:underline truncate">
                     {decodeURIComponent(selectedLesson.file_url.split('/').pop() ?? selectedLesson.file_url)}
                   </a>
                   <ExternalLink size={11} className="text-gray-300 flex-shrink-0 ml-auto" />
@@ -449,15 +478,14 @@ export function ModuleBuilder({ initialModules, courseId, canManage }: Props) {
     );
   };
 
+  /* ── Shared dropdown item styles ─────────────────────────────────── */
+  const ddItem = 'flex items-center gap-2 w-full px-3 py-2 text-xs transition-colors';
+  const ddItemDefault = `${ddItem} text-gray-700 hover:bg-indigo-50 hover:text-indigo-700`;
+  const ddItemDanger  = `${ddItem} text-red-600 hover:bg-red-50`;
+
   /* ── Render ──────────────────────────────────────────────────────── */
   return (
-    /* Break out of parent p-6 to fill the card edge-to-edge */
     <div className="-m-6 flex" style={{ minHeight: 580 }}>
-
-      {/* Click-away overlay for footer dropdown */}
-      {openDropdown && (
-        <div className="fixed inset-0 z-10" onClick={() => setOpenDropdown(null)} />
-      )}
 
       {/* ── LEFT PANEL: Course structure ── */}
       <div className="w-[280px] xl:w-[300px] flex-shrink-0 border-r border-gray-200 flex flex-col bg-gray-50/60">
@@ -474,7 +502,6 @@ export function ModuleBuilder({ initialModules, courseId, canManage }: Props) {
         {/* Module + lesson tree — scrollable */}
         <div className="flex-1 overflow-y-auto p-3 space-y-2">
 
-          {/* Empty state */}
           {modules.length === 0 && (
             <div className="flex flex-col items-center justify-center py-16 text-center px-4">
               <div className="w-12 h-12 rounded-xl bg-indigo-50 flex items-center justify-center mb-3">
@@ -495,10 +522,8 @@ export function ModuleBuilder({ initialModules, courseId, canManage }: Props) {
             </div>
           )}
 
-          {/* Modules */}
           {modules.map((mod, mIdx) => {
             const isOpen = expanded.has(mod.id);
-            const isDropdownOpen = openDropdown === mod.id;
             return (
               <div key={mod.id} className="rounded-xl border border-gray-200 bg-white shadow-sm">
 
@@ -516,18 +541,35 @@ export function ModuleBuilder({ initialModules, courseId, canManage }: Props) {
                   <span className="text-[10px] text-gray-400 flex-shrink-0">
                     {mod.course_lessons.length}
                   </span>
+
+                  {/* Module actions — portal dropdown */}
                   {canManage && (
-                    <div className="flex items-center gap-0 opacity-0 group-hover/mhdr:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}>
-                      <button onClick={() => openEditModule(mod)} title="რედაქტირება"
-                        className="p-1 rounded text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors">
-                        <Pencil size={10} />
+                    <div className="opacity-0 group-hover/mhdr:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}>
+                      <button
+                        onClick={e => openDD(`mod-${mod.id}`, e)}
+                        className="p-1 rounded text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors"
+                        title="მოქმედებები"
+                      >
+                        <MoreVertical size={12} />
                       </button>
-                      <button onClick={() => deleteModule(mod.id)} disabled={deleting === mod.id} title="წაშლა"
-                        className="p-1 rounded text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors disabled:opacity-40">
-                        <Trash2 size={10} />
-                      </button>
+                      <PortalMenu dd={dd} id={`mod-${mod.id}`} close={closeDD} rightAlign>
+                        <button
+                          onClick={() => { closeDD(); openEditModule(mod); }}
+                          className={ddItemDefault}
+                        >
+                          <Pencil size={11} />რედაქტირება
+                        </button>
+                        <button
+                          onClick={() => { closeDD(); deleteModule(mod.id); }}
+                          disabled={deleting === mod.id}
+                          className={`${ddItemDanger} disabled:opacity-40`}
+                        >
+                          <Trash2 size={11} />წაშლა
+                        </button>
+                      </PortalMenu>
                     </div>
                   )}
+
                   {isOpen
                     ? <ChevronDown size={12} className="text-gray-400 flex-shrink-0" />
                     : <ChevronRight size={12} className="text-gray-400 flex-shrink-0" />}
@@ -563,61 +605,74 @@ export function ModuleBuilder({ initialModules, courseId, canManage }: Props) {
                           <p className={`text-xs flex-1 truncate ${isSelected ? 'font-semibold text-indigo-700' : 'text-gray-700'}`}>
                             {lesson.title}
                           </p>
+
+                          {/* Lesson actions — portal dropdown */}
                           {canManage && (
-                            <div className="flex items-center gap-0 opacity-0 group-hover/lrow:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}>
-                              <button onClick={() => openEditLesson(lesson)} title="რედაქტირება"
-                                className="p-1 rounded text-gray-400 hover:text-indigo-600 hover:bg-indigo-100 transition-colors">
-                                <Pencil size={10} />
+                            <div className="opacity-0 group-hover/lrow:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}>
+                              <button
+                                onClick={e => openDD(`les-${lesson.id}`, e)}
+                                className="p-1 rounded text-gray-400 hover:text-indigo-600 hover:bg-indigo-100 transition-colors"
+                                title="მოქმედებები"
+                              >
+                                <MoreVertical size={12} />
                               </button>
-                              <button onClick={() => deleteLesson(lesson.id)} disabled={deleting === lesson.id} title="წაშლა"
-                                className="p-1 rounded text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors disabled:opacity-40">
-                                <Trash2 size={10} />
-                              </button>
+                              <PortalMenu dd={dd} id={`les-${lesson.id}`} close={closeDD} rightAlign>
+                                <button
+                                  onClick={() => { closeDD(); openEditLesson(lesson); }}
+                                  className={ddItemDefault}
+                                >
+                                  <Pencil size={11} />რედაქტირება
+                                </button>
+                                <button
+                                  onClick={() => { closeDD(); deleteLesson(lesson.id); }}
+                                  disabled={deleting === lesson.id}
+                                  className={`${ddItemDanger} disabled:opacity-40`}
+                                >
+                                  <Trash2 size={11} />წაშლა
+                                </button>
+                              </PortalMenu>
                             </div>
                           )}
                         </div>
                       );
                     })}
 
-                    {/* Module footer — add content */}
+                    {/* Module footer — add content (portal dropdown) */}
                     {canManage && (
-                      <div className="px-3 py-2 border-t border-gray-100 bg-gray-50/60 rounded-b-xl relative z-20">
+                      <div className="px-3 py-2 border-t border-gray-100 bg-gray-50/60 rounded-b-xl">
                         <button
-                          onClick={() => setOpenDropdown(isDropdownOpen ? null : mod.id)}
+                          onClick={e => openDD(`add-${mod.id}`, e)}
                           className={[
                             'flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold rounded-lg border transition-all w-full justify-center',
-                            isDropdownOpen
+                            dd?.id === `add-${mod.id}`
                               ? 'bg-indigo-600 text-white border-indigo-600'
                               : 'bg-white text-indigo-600 border-indigo-200 hover:bg-indigo-50',
                           ].join(' ')}
                         >
-                          <Plus size={11} />
-                          კონტენტი
-                          <ChevronDown size={10} className={`transition-transform ${isDropdownOpen ? 'rotate-180' : ''}`} />
+                          <Plus size={11} />კონტენტი
+                          <ChevronDown size={10} className={`transition-transform ${dd?.id === `add-${mod.id}` ? 'rotate-180' : ''}`} />
                         </button>
 
-                        {isDropdownOpen && (
-                          <div className="absolute left-3 right-3 bottom-full mb-1 bg-white border border-gray-200 rounded-xl shadow-xl overflow-hidden z-30">
-                            <div className="px-3 py-1.5 border-b border-gray-100">
-                              <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide">გაკვეთილის ტიპი</p>
-                            </div>
-                            {LESSON_TYPES.map(lt => {
-                              const LIcon = lt.icon;
-                              return (
-                                <button
-                                  key={lt.value}
-                                  onClick={() => openAddLesson(mod.id, lt.value)}
-                                  className="flex items-center gap-2.5 w-full px-3 py-2 text-xs text-gray-700 hover:bg-indigo-50 hover:text-indigo-700 transition-colors"
-                                >
-                                  <span className={`w-5 h-5 rounded-md flex items-center justify-center flex-shrink-0 ${lt.color}`}>
-                                    <LIcon size={11} />
-                                  </span>
-                                  {lt.label}
-                                </button>
-                              );
-                            })}
+                        <PortalMenu dd={dd} id={`add-${mod.id}`} close={closeDD}>
+                          <div className="px-3 py-1.5 border-b border-gray-100">
+                            <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide">გაკვეთილის ტიპი</p>
                           </div>
-                        )}
+                          {LESSON_TYPES.map(lt => {
+                            const LIcon = lt.icon;
+                            return (
+                              <button
+                                key={lt.value}
+                                onClick={() => { closeDD(); openAddLesson(mod.id, lt.value); }}
+                                className="flex items-center gap-2.5 w-full px-3 py-2 text-xs text-gray-700 hover:bg-indigo-50 hover:text-indigo-700 transition-colors"
+                              >
+                                <span className={`w-5 h-5 rounded-md flex items-center justify-center flex-shrink-0 ${lt.color}`}>
+                                  <LIcon size={11} />
+                                </span>
+                                {lt.label}
+                              </button>
+                            );
+                          })}
+                        </PortalMenu>
                       </div>
                     )}
                   </>
