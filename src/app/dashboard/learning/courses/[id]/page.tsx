@@ -8,6 +8,7 @@ import { QuizSection } from './quiz-section';
 import { EnrolleesSection } from './enrollees-section';
 import { ModuleBuilder } from './module-builder';
 import { PublishButton } from './publish-button';
+import { CourseSettings } from './course-settings';
 import {
   ArrowLeft, Clock, Users, BookOpen, HelpCircle,
   ShieldCheck, BarChart2, Calendar, GraduationCap,
@@ -63,6 +64,7 @@ export default async function CourseBuilderPage({ params, searchParams }: Props)
     { data: quizzes },
     { data: enrollments },
     { data: rawModules, error: modulesError },
+    { data: categories },
   ] = await Promise.all([
     supabase.from('courses').select('*').eq('id', id).single(),
     supabase.from('quizzes').select('*, quiz_questions(count)').eq('course_id', id),
@@ -72,6 +74,7 @@ export default async function CourseBuilderPage({ params, searchParams }: Props)
       .eq('course_id', id)
       .order('sort_order')
       .order('sort_order', { referencedTable: 'course_lessons' }),
+    supabase.from('course_categories').select('id, name').eq('status', 'active').order('name'),
   ]);
 
   if (!course) notFound();
@@ -198,20 +201,20 @@ export default async function CourseBuilderPage({ params, searchParams }: Props)
 
             {/* ── Overview tab ──────────────────────────────────── */}
             {active === 'overview' && (
-              <div className="space-y-6">
-                {course.description && (
-                  <div>
-                    <h3 className="text-sm font-semibold text-gray-900 mb-2">კურსის შესახებ</h3>
-                    <p className="text-sm text-gray-600 leading-relaxed">{course.description}</p>
-                  </div>
-                )}
+              <div className="space-y-8">
+
+                {/* Editable course settings */}
+                <CourseSettings
+                  course={course}
+                  categories={categories ?? []}
+                  canManage={canManage}
+                />
+
+                {/* Read-only stats */}
                 <div>
-                  <h3 className="text-sm font-semibold text-gray-900 mb-3">დეტალები</h3>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                  <h3 className="text-sm font-semibold text-gray-900 mb-3">სტატისტიკა</h3>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                     {[
-                      { icon: BarChart2,    label: 'სირთულე',      val: DIFF_LABEL[course.difficulty] ?? course.difficulty ?? '—' },
-                      { icon: Clock,        label: 'ხანგრძლივობა', val: formatDuration(course.estimated_duration_minutes ?? 0) },
-                      { icon: Target,       label: 'გამსვლელი',    val: `${course.passing_score ?? 70}%` },
                       { icon: Layers,       label: 'სექციები',     val: totalModules },
                       { icon: BookOpen,     label: 'გაკვეთილები',  val: totalLessons },
                       { icon: Calendar,     label: 'შეიქმნა',      val: formatDate(course.created_at) },
