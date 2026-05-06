@@ -6,7 +6,7 @@ import {
   ChevronDown, ChevronRight, Plus, Pencil, Trash2,
   FileText, Video, File, HelpCircle, CheckSquare, ClipboardList,
   AlertCircle, Layers, BookOpen, ExternalLink, PlayCircle,
-  MoreVertical,
+  MoreVertical, SlidersHorizontal, Copy, History, Eye, EyeOff,
 } from 'lucide-react';
 
 /* ── Types ─────────────────────────────────────────────────────────── */
@@ -21,6 +21,7 @@ interface CLesson {
   sort_order: number;
   is_required: boolean;
   duration_minutes: number;
+  is_published?: boolean; // requires migration 009_lesson_published.sql
 }
 interface CModule {
   id: string;
@@ -60,46 +61,31 @@ const Spinner = () => (
 );
 
 /* ── Portal dropdown ─────────────────────────────────────────────────
-   Renders into document.body so overflow:hidden/auto on any ancestor
-   cannot clip it. Position is derived from the trigger's DOMRect.
+   Renders into document.body — bypasses any overflow:hidden ancestor.
    ─────────────────────────────────────────────────────────────────── */
 interface DDState { id: string; rect: DOMRect; }
 
 function PortalMenu({
   dd, id, close, children, rightAlign = false,
 }: {
-  dd: DDState | null;
-  id: string;
-  close: () => void;
-  children: React.ReactNode;
-  rightAlign?: boolean;
+  dd: DDState | null; id: string; close: () => void;
+  children: React.ReactNode; rightAlign?: boolean;
 }) {
   if (!dd || dd.id !== id) return null;
-
   const { rect } = dd;
   const spaceBelow = window.innerHeight - rect.bottom;
-  const goUp = spaceBelow < 260;
-
+  const goUp = spaceBelow < 280;
   const style: React.CSSProperties = {
     position: 'fixed',
     zIndex: 9999,
-    minWidth: Math.max(rect.width, 160),
-    ...(rightAlign
-      ? { right: window.innerWidth - rect.right }
-      : { left: rect.left }),
-    ...(goUp
-      ? { bottom: window.innerHeight - rect.top + 4 }
-      : { top: rect.bottom + 4 }),
+    minWidth: Math.max(rect.width, 192),
+    ...(rightAlign ? { right: window.innerWidth - rect.right } : { left: rect.left }),
+    ...(goUp ? { bottom: window.innerHeight - rect.top + 4 } : { top: rect.bottom + 4 }),
   };
-
   return createPortal(
     <>
-      {/* click-away backdrop */}
       <div className="fixed inset-0" style={{ zIndex: 9998 }} onClick={close} />
-      <div
-        className="bg-white border border-gray-200 rounded-xl shadow-xl overflow-hidden"
-        style={style}
-      >
+      <div className="bg-white border border-gray-200 rounded-xl shadow-xl overflow-hidden py-1" style={style}>
         {children}
       </div>
     </>,
@@ -114,11 +100,10 @@ export function ModuleBuilder({ initialModules, courseId, canManage }: Props) {
   const [selectedLesson, setSelectedLesson] = useState<CLesson | null>(null);
   const [loading, setLoading]           = useState(false);
   const [error, setError]               = useState('');
-  const [deleting, setDeleting]         = useState<string | null>(null);
+  const [cloning, setCloning]           = useState<string | null>(null);
 
-  /* single dropdown state: which menu is open + its trigger rect */
+  /* single open-dropdown state */
   const [dd, setDd] = useState<DDState | null>(null);
-
   const openDD = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
@@ -126,16 +111,30 @@ export function ModuleBuilder({ initialModules, courseId, canManage }: Props) {
   };
   const closeDD = () => setDd(null);
 
+  /* module modal */
   const [modModal, setModModal] = useState<{ open: boolean; mode: 'add' | 'edit'; mod?: CModule }>({ open: false, mode: 'add' });
   const [modForm, setModForm]   = useState(MOD_DEF);
 
+  /* lesson edit modal */
   const [lesModal, setLesModal] = useState<{ open: boolean; mode: 'add' | 'edit'; moduleId?: string; lesson?: CLesson }>({ open: false, mode: 'add' });
   const [lesForm, setLesForm]   = useState(LES_DEF);
 
+  /* rename modal */
+  const [renameModal, setRenameModal] = useState<{ open: boolean; lesson: CLesson | null }>({ open: false, lesson: null });
+  const [renameTitle, setRenameTitle] = useState('');
+  const [renameLoading, setRenameLoading] = useState(false);
+
+  /* delete confirm modal */
+  const [deleteModal, setDeleteModal] = useState<{ open: boolean; lesson: CLesson | null }>({ open: false, lesson: null });
+  const [deleteLoading, setDeleteLoading] = useState(false);
+
+  /* version history placeholder modal */
+  const [historyModal, setHistoryModal] = useState(false);
+
   /* ── Reload ──────────────────────────────────────────────────────── */
   const reload = async () => {
-    const supabase = createClient();
-    const { data } = await supabase
+    const sb = createClient();
+    const { data } = await sb
       .from('course_modules').select('*, course_lessons(*)')
       .eq('course_id', courseId)
       .order('sort_order')
@@ -154,40 +153,34 @@ export function ModuleBuilder({ initialModules, courseId, canManage }: Props) {
     e.preventDefault();
     if (!modForm.title.trim()) { setError('სათაური სავალდებულოა.'); return; }
     setLoading(true); setError('');
-    const supabase = createClient();
-
+    const sb = createClient();
     if (modModal.mode === 'add') {
       const nextOrder = modules.length > 0 ? Math.max(...modules.map(m => m.sort_order)) + 1 : 0;
-      const { data: inserted, error: insertErr } = await supabase
+      const { data: inserted, error: err } = await sb
         .from('course_modules')
         .insert({ course_id: courseId, title: modForm.title.trim(), description: modForm.description.trim() || null, sort_order: nextOrder })
         .select().single();
-
       setLoading(false);
-      if (insertErr) { setError(insertErr.message); return; }
+      if (err) { setError(err.message); return; }
       setModModal({ open: false, mode: 'add' });
       setModules(prev => [...prev, { ...inserted, course_lessons: [] } as CModule]);
       setExpanded(prev => new Set([...prev, inserted.id]));
-
     } else if (modModal.mod) {
-      const { error: updateErr } = await supabase
+      const { error: err } = await sb
         .from('course_modules')
-        .update({ title: modForm.title.trim(), description: modForm.description.trim() || null, updated_at: new Date().toISOString() })
+        .update({ title: modForm.title.trim(), description: modForm.description.trim() || null })
         .eq('id', modModal.mod.id);
-
       setLoading(false);
-      if (updateErr) { setError(updateErr.message); return; }
+      if (err) { setError(err.message); return; }
       setModModal({ open: false, mode: 'add' });
       await reload();
     }
   };
   const deleteModule = async (modId: string) => {
     if (!confirm('სექციის წაშლა? ყველა გაკვეთილიც წაიშლება.')) return;
-    setDeleting(modId);
-    const supabase = createClient();
-    const { error: delErr } = await supabase.from('course_modules').delete().eq('id', modId);
-    setDeleting(null);
-    if (delErr) { setError(delErr.message); return; }
+    const sb = createClient();
+    const { error: err } = await sb.from('course_modules').delete().eq('id', modId);
+    if (err) { setError(err.message); return; }
     setModules(prev => prev.filter(m => m.id !== modId));
     setSelectedLesson(prev => {
       if (!prev) return null;
@@ -216,67 +209,151 @@ export function ModuleBuilder({ initialModules, courseId, canManage }: Props) {
     e.preventDefault();
     if (!lesForm.title.trim()) { setError('სათაური სავალდებულოა.'); return; }
     setLoading(true); setError('');
-    const supabase = createClient();
-    const mod = modules.find(m => m.id === lesModal.moduleId);
+    const sb = createClient();
 
-    if (lesModal.mode === 'add' && mod) {
-      const { data: inserted, error: insertErr } = await supabase
+    if (lesModal.mode === 'add') {
+      const mod = modules.find(m => m.id === lesModal.moduleId);
+      const nextOrder = mod ? Math.max(...mod.course_lessons.map(l => l.sort_order ?? 0), -1) + 1 : 0;
+      const { data: inserted, error: err } = await sb
         .from('course_lessons')
         .insert({
-          module_id:   lesModal.moduleId,
-          title:       lesForm.title.trim(),
-          lesson_type: lesForm.lesson_type,
-          content:     lesForm.content.trim() || null,
-          video_url:   lesForm.video_url.trim() || null,
-          file_url:    lesForm.file_url.trim() || null,
+          module_id:        lesModal.moduleId,
+          title:            lesForm.title.trim(),
+          lesson_type:      lesForm.lesson_type,
+          content:          lesForm.content.trim() || null,
+          video_url:        lesForm.video_url.trim() || null,
+          file_url:         lesForm.file_url.trim() || null,
+          sort_order:       nextOrder,
+          duration_minutes: lesForm.duration_minutes,
+          is_required:      lesForm.is_required,
         })
         .select().single();
-
       setLoading(false);
-      if (insertErr) { setError(insertErr.message); return; }
-      const capturedModuleId = lesModal.moduleId!;
+      if (err) { setError(err.message); return; }
+      const mid = lesModal.moduleId!;
       setLesModal({ open: false, mode: 'add' });
       const newLesson = inserted as CLesson;
-      setModules(prev => prev.map(m =>
-        m.id === capturedModuleId ? { ...m, course_lessons: [...m.course_lessons, newLesson] } : m
-      ));
-      setExpanded(prev => new Set([...prev, capturedModuleId]));
+      setModules(prev => prev.map(m => m.id === mid ? { ...m, course_lessons: [...m.course_lessons, newLesson] } : m));
+      setExpanded(prev => new Set([...prev, mid]));
       setSelectedLesson(newLesson);
 
     } else if (lesModal.lesson) {
-      const { error: updateErr } = await supabase
+      const { error: err } = await sb
         .from('course_lessons')
         .update({
-          title:       lesForm.title.trim(),
-          lesson_type: lesForm.lesson_type,
-          content:     lesForm.content.trim() || null,
-          video_url:   lesForm.video_url.trim() || null,
-          file_url:    lesForm.file_url.trim() || null,
+          title:            lesForm.title.trim(),
+          lesson_type:      lesForm.lesson_type,
+          content:          lesForm.content.trim() || null,
+          video_url:        lesForm.video_url.trim() || null,
+          file_url:         lesForm.file_url.trim() || null,
+          duration_minutes: lesForm.duration_minutes,
+          is_required:      lesForm.is_required,
         })
         .eq('id', lesModal.lesson.id);
-
       setLoading(false);
-      if (updateErr) { setError(updateErr.message); return; }
-      const updatedLesson: CLesson = { ...lesModal.lesson, ...lesForm, title: lesForm.title.trim() };
-      const capturedModuleId = lesModal.moduleId!;
+      if (err) { setError(err.message); return; }
+      const updated: CLesson = { ...lesModal.lesson, ...lesForm, title: lesForm.title.trim() };
+      const mid = lesModal.moduleId!;
       setLesModal({ open: false, mode: 'add' });
       setModules(prev => prev.map(m =>
-        m.id === capturedModuleId
-          ? { ...m, course_lessons: m.course_lessons.map(l => l.id === updatedLesson.id ? updatedLesson : l) }
-          : m
+        m.id === mid ? { ...m, course_lessons: m.course_lessons.map(l => l.id === updated.id ? updated : l) } : m
       ));
-      if (selectedLesson?.id === updatedLesson.id) setSelectedLesson(updatedLesson);
+      if (selectedLesson?.id === updated.id) setSelectedLesson(updated);
     }
   };
-  const deleteLesson = async (lessonId: string) => {
-    if (!confirm('გაკვეთილის წაშლა?')) return;
-    setDeleting(lessonId);
-    const supabase = createClient();
-    const { error: delErr } = await supabase.from('course_lessons').delete().eq('id', lessonId);
-    setDeleting(null);
-    if (delErr) { setError(delErr.message); return; }
-    setModules(prev => prev.map(m => ({ ...m, course_lessons: m.course_lessons.filter(l => l.id !== lessonId) })));
-    if (selectedLesson?.id === lessonId) setSelectedLesson(null);
+
+  /* ── Rename ──────────────────────────────────────────────────────── */
+  const openRenameLesson = (lesson: CLesson) => {
+    closeDD();
+    setRenameTitle(lesson.title);
+    setRenameModal({ open: true, lesson });
+  };
+  const saveRename = async () => {
+    if (!renameModal.lesson || !renameTitle.trim()) return;
+    setRenameLoading(true);
+    const sb = createClient();
+    const { error: err } = await sb
+      .from('course_lessons')
+      .update({ title: renameTitle.trim() })
+      .eq('id', renameModal.lesson.id);
+    setRenameLoading(false);
+    if (err) { setError(err.message); return; }
+    const updated = { ...renameModal.lesson, title: renameTitle.trim() };
+    setModules(prev => prev.map(m => ({
+      ...m,
+      course_lessons: m.course_lessons.map(l => l.id === updated.id ? updated : l),
+    })));
+    if (selectedLesson?.id === updated.id) setSelectedLesson(updated);
+    setRenameModal({ open: false, lesson: null });
+  };
+
+  /* ── Clone ───────────────────────────────────────────────────────── */
+  const cloneLesson = async (lesson: CLesson) => {
+    closeDD();
+    setCloning(lesson.id);
+    const sb = createClient();
+    const mod = modules.find(m => m.course_lessons.some(l => l.id === lesson.id));
+    const nextOrder = mod ? Math.max(...mod.course_lessons.map(l => l.sort_order ?? 0), -1) + 1 : 0;
+    const { data: inserted, error: err } = await sb
+      .from('course_lessons')
+      .insert({
+        module_id:        lesson.module_id,
+        title:            `${lesson.title} (ასლი)`,
+        lesson_type:      lesson.lesson_type,
+        content:          lesson.content,
+        video_url:        lesson.video_url,
+        file_url:         lesson.file_url,
+        sort_order:       nextOrder,
+        duration_minutes: lesson.duration_minutes,
+        is_required:      lesson.is_required,
+      })
+      .select().single();
+    setCloning(null);
+    if (err || !inserted) { setError(err?.message ?? 'შეცდომა'); return; }
+    const clone = inserted as CLesson;
+    setModules(prev => prev.map(m =>
+      m.id === lesson.module_id ? { ...m, course_lessons: [...m.course_lessons, clone] } : m
+    ));
+    setSelectedLesson(clone);
+  };
+
+  /* ── Publish toggle ──────────────────────────────────────────────── */
+  const togglePublish = async (lesson: CLesson) => {
+    closeDD();
+    const newVal = !(lesson.is_published ?? true);
+    const sb = createClient();
+    const { error: err } = await sb
+      .from('course_lessons')
+      .update({ is_published: newVal })
+      .eq('id', lesson.id);
+    if (err) {
+      setError('გაუშვეთ migration 009_lesson_published.sql Supabase-ში.');
+      return;
+    }
+    const updated = { ...lesson, is_published: newVal };
+    setModules(prev => prev.map(m => ({
+      ...m,
+      course_lessons: m.course_lessons.map(l => l.id === updated.id ? updated : l),
+    })));
+    if (selectedLesson?.id === updated.id) setSelectedLesson(updated);
+  };
+
+  /* ── Delete (modal confirm) ──────────────────────────────────────── */
+  const openDeleteConfirm = (lesson: CLesson) => {
+    closeDD();
+    setDeleteModal({ open: true, lesson });
+  };
+  const confirmDelete = async () => {
+    const lesson = deleteModal.lesson;
+    if (!lesson) return;
+    setDeleteLoading(true);
+    const sb = createClient();
+    const { error: err } = await sb.from('course_lessons').delete().eq('id', lesson.id);
+    setDeleteLoading(false);
+    if (err) { setError(err.message); return; }
+    setModules(prev => prev.map(m => ({ ...m, course_lessons: m.course_lessons.filter(l => l.id !== lesson.id) })));
+    if (selectedLesson?.id === lesson.id) setSelectedLesson(null);
+    setDeleteModal({ open: false, lesson: null });
   };
 
   const toggleExpand = (id: string) => setExpanded(prev => {
@@ -300,7 +377,7 @@ export function ModuleBuilder({ initialModules, courseId, canManage }: Props) {
     return null;
   }
 
-  /* ── Right panel — selected lesson viewer ───────────────────────── */
+  /* ── Right panel ─────────────────────────────────────────────────── */
   const RightPanel = () => {
     if (!selectedLesson) {
       return (
@@ -315,17 +392,23 @@ export function ModuleBuilder({ initialModules, courseId, canManage }: Props) {
         </div>
       );
     }
-
     const tc = typeConfig(selectedLesson.lesson_type);
     const Icon = tc.icon;
-
+    const isDraft = !(selectedLesson.is_published ?? true);
     return (
       <div className="p-6 h-full overflow-y-auto">
         <div className="flex items-start justify-between gap-4 mb-6">
           <div className="min-w-0 flex-1">
-            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold mb-3 ${tc.badgeColor}`}>
-              <Icon size={11} />{tc.label}
-            </span>
+            <div className="flex items-center gap-2 mb-3">
+              <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold ${tc.badgeColor}`}>
+                <Icon size={11} />{tc.label}
+              </span>
+              {isDraft && (
+                <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-semibold bg-gray-100 text-gray-500">
+                  <EyeOff size={10} />draft
+                </span>
+              )}
+            </div>
             <h2 className="text-xl font-bold text-gray-900 leading-tight break-words">
               {selectedLesson.title}
             </h2>
@@ -335,61 +418,48 @@ export function ModuleBuilder({ initialModules, courseId, canManage }: Props) {
               onClick={() => openEditLesson(selectedLesson)}
               className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 hover:border-gray-300 transition-colors flex-shrink-0 shadow-sm"
             >
-              <Pencil size={13} />
-              რედაქტირება
+              <Pencil size={13} />რედაქტირება
             </button>
           )}
         </div>
 
         <div className="border-t border-gray-100 pt-5 space-y-5">
-
           {selectedLesson.lesson_type === 'text' && (
             selectedLesson.content?.trim() ? (
-              <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">
-                {selectedLesson.content}
-              </p>
+              <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{selectedLesson.content}</p>
             ) : (
               <div className="flex items-center gap-2 p-4 bg-gray-50 rounded-xl text-sm text-gray-400">
-                <FileText size={15} className="flex-shrink-0" />
-                ტექსტი არ არის — დაამატეთ „რედაქტირება"-ს გამოყენებით.
+                <FileText size={15} className="flex-shrink-0" />ტექსტი არ არის — დაამატეთ „რედაქტირება"-ს გამოყენებით.
               </div>
             )
           )}
-
           {selectedLesson.lesson_type === 'acknowledgement' && (
             <div className="space-y-3">
               <div className="flex items-start gap-3 p-4 bg-green-50 border border-green-200 rounded-xl">
                 <CheckSquare size={18} className="text-green-500 flex-shrink-0 mt-0.5" />
                 <div>
                   <p className="text-sm font-semibold text-green-800 mb-0.5">დასტური</p>
-                  <p className="text-xs text-green-700 leading-relaxed">
-                    მომხმარებელი დაადასტურებს, რომ გაეცნო ამ მასალას.
-                  </p>
+                  <p className="text-xs text-green-700 leading-relaxed">მომხმარებელი დაადასტურებს, რომ გაეცნო ამ მასალას.</p>
                 </div>
               </div>
               {selectedLesson.content?.trim() && (
-                <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">
-                  {selectedLesson.content}
-                </p>
+                <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{selectedLesson.content}</p>
               )}
             </div>
           )}
-
           {selectedLesson.lesson_type === 'video' && (
             selectedLesson.video_url ? (
               <div className="space-y-3">
                 <div className="flex items-center gap-2 p-3 bg-gray-50 rounded-xl text-sm">
                   <ExternalLink size={13} className="text-gray-400 flex-shrink-0" />
                   <a href={selectedLesson.video_url} target="_blank" rel="noopener noreferrer"
-                    className="text-indigo-600 hover:underline truncate">
-                    {selectedLesson.video_url}
-                  </a>
+                    className="text-indigo-600 hover:underline truncate">{selectedLesson.video_url}</a>
                 </div>
                 {(() => {
-                  const embedUrl = getYouTubeEmbed(selectedLesson.video_url);
-                  return embedUrl ? (
+                  const embed = getYouTubeEmbed(selectedLesson.video_url!);
+                  return embed ? (
                     <div className="aspect-video rounded-xl overflow-hidden border border-gray-200">
-                      <iframe src={embedUrl} title={selectedLesson.title} className="w-full h-full"
+                      <iframe src={embed} title={selectedLesson.title} className="w-full h-full"
                         allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
                         allowFullScreen />
                     </div>
@@ -403,12 +473,10 @@ export function ModuleBuilder({ initialModules, courseId, canManage }: Props) {
               </div>
             ) : (
               <div className="flex items-center gap-2 p-4 bg-gray-50 rounded-xl text-sm text-gray-400">
-                <Video size={15} className="flex-shrink-0" />
-                ვიდეო ბმული არ არის მითითებული — დაამატეთ „რედაქტირება"-ს გამოყენებით.
+                <Video size={15} className="flex-shrink-0" />ვიდეო ბმული არ არის მითითებული.
               </div>
             )
           )}
-
           {selectedLesson.lesson_type === 'pdf' && (
             selectedLesson.file_url ? (
               <div className="space-y-3">
@@ -427,12 +495,10 @@ export function ModuleBuilder({ initialModules, courseId, canManage }: Props) {
               </div>
             ) : (
               <div className="flex items-center gap-2 p-4 bg-gray-50 rounded-xl text-sm text-gray-400">
-                <File size={15} className="flex-shrink-0" />
-                ფაილი არ არის — დაამატეთ „რედაქტირება"-ს გამოყენებით.
+                <File size={15} className="flex-shrink-0" />ფაილი არ არის.
               </div>
             )
           )}
-
           {selectedLesson.lesson_type === 'quiz' && (
             <div className="flex items-start gap-3 p-4 bg-amber-50 border border-amber-200 rounded-xl">
               <HelpCircle size={18} className="text-amber-500 flex-shrink-0 mt-0.5" />
@@ -445,7 +511,6 @@ export function ModuleBuilder({ initialModules, courseId, canManage }: Props) {
               </div>
             </div>
           )}
-
           {selectedLesson.lesson_type === 'assignment' && (
             <div className="space-y-3">
               {selectedLesson.file_url && (
@@ -461,14 +526,11 @@ export function ModuleBuilder({ initialModules, courseId, canManage }: Props) {
               {selectedLesson.content?.trim() ? (
                 <div className="p-4 bg-gray-50 rounded-xl">
                   <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">ინსტრუქცია</p>
-                  <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">
-                    {selectedLesson.content}
-                  </p>
+                  <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{selectedLesson.content}</p>
                 </div>
               ) : (
                 <div className="flex items-center gap-2 p-4 bg-gray-50 rounded-xl text-sm text-gray-400">
-                  <ClipboardList size={15} className="flex-shrink-0" />
-                  ინსტრუქციები არ არის — დაამატეთ „რედაქტირება"-ს გამოყენებით.
+                  <ClipboardList size={15} className="flex-shrink-0" />ინსტრუქციები არ არის.
                 </div>
               )}
             </div>
@@ -478,19 +540,17 @@ export function ModuleBuilder({ initialModules, courseId, canManage }: Props) {
     );
   };
 
-  /* ── Shared dropdown item styles ─────────────────────────────────── */
-  const ddItem = 'flex items-center gap-2 w-full px-3 py-2 text-xs transition-colors';
-  const ddItemDefault = `${ddItem} text-gray-700 hover:bg-indigo-50 hover:text-indigo-700`;
-  const ddItemDanger  = `${ddItem} text-red-600 hover:bg-red-50`;
+  /* ── Dropdown item class helpers ─────────────────────────────────── */
+  const ddRow = 'flex items-center gap-2.5 w-full px-3 py-2 text-xs transition-colors text-left';
 
   /* ── Render ──────────────────────────────────────────────────────── */
   return (
     <div className="-m-6 flex" style={{ minHeight: 580 }}>
 
-      {/* ── LEFT PANEL: Course structure ── */}
+      {/* ── LEFT PANEL ── */}
       <div className="w-[280px] xl:w-[300px] flex-shrink-0 border-r border-gray-200 flex flex-col bg-gray-50/60">
 
-        {/* Panel header */}
+        {/* header */}
         <div className="px-4 py-3 border-b border-gray-200 bg-white flex items-center justify-between flex-shrink-0">
           <p className="text-xs text-gray-400">
             <span className="font-semibold text-gray-700">{modules.length}</span> სექცია
@@ -499,7 +559,7 @@ export function ModuleBuilder({ initialModules, courseId, canManage }: Props) {
           </p>
         </div>
 
-        {/* Module + lesson tree — scrollable */}
+        {/* module/lesson tree */}
         <div className="flex-1 overflow-y-auto p-3 space-y-2">
 
           {modules.length === 0 && (
@@ -508,14 +568,10 @@ export function ModuleBuilder({ initialModules, courseId, canManage }: Props) {
                 <Layers size={22} className="text-indigo-300" />
               </div>
               <p className="text-xs font-semibold text-gray-600 mb-1">სექციები არ არის</p>
-              <p className="text-[11px] text-gray-400 leading-relaxed">
-                დაამატეთ სექცია კონტენტის სტრუქტურირებისთვის.
-              </p>
+              <p className="text-[11px] text-gray-400 leading-relaxed">დაამატეთ სექცია კონტენტის სტრუქტურირებისთვის.</p>
               {canManage && (
-                <button
-                  onClick={openAddModule}
-                  className="mt-4 flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors"
-                >
+                <button onClick={openAddModule}
+                  className="mt-4 flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors">
                   <Plus size={12} />სექციის დამატება
                 </button>
               )}
@@ -527,7 +583,7 @@ export function ModuleBuilder({ initialModules, courseId, canManage }: Props) {
             return (
               <div key={mod.id} className="rounded-xl border border-gray-200 bg-white shadow-sm">
 
-                {/* Module header row */}
+                {/* module header */}
                 <div
                   className="flex items-center gap-2 px-3 py-2.5 cursor-pointer select-none group/mhdr rounded-t-xl bg-gradient-to-r from-gray-50 to-white hover:bg-gray-100/80 transition-colors"
                   onClick={() => toggleExpand(mod.id)}
@@ -538,32 +594,22 @@ export function ModuleBuilder({ initialModules, courseId, canManage }: Props) {
                   <p className="text-xs font-semibold text-gray-800 flex-1 truncate group-hover/mhdr:text-indigo-700 transition-colors">
                     {mod.title}
                   </p>
-                  <span className="text-[10px] text-gray-400 flex-shrink-0">
-                    {mod.course_lessons.length}
-                  </span>
+                  <span className="text-[10px] text-gray-400 flex-shrink-0">{mod.course_lessons.length}</span>
 
-                  {/* Module actions — portal dropdown */}
                   {canManage && (
                     <div className="opacity-0 group-hover/mhdr:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}>
-                      <button
-                        onClick={e => openDD(`mod-${mod.id}`, e)}
-                        className="p-1 rounded text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors"
-                        title="მოქმედებები"
-                      >
+                      <button onClick={e => openDD(`mod-${mod.id}`, e)}
+                        className="p-1 rounded text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors">
                         <MoreVertical size={12} />
                       </button>
                       <PortalMenu dd={dd} id={`mod-${mod.id}`} close={closeDD} rightAlign>
-                        <button
-                          onClick={() => { closeDD(); openEditModule(mod); }}
-                          className={ddItemDefault}
-                        >
+                        <button onClick={() => { closeDD(); openEditModule(mod); }}
+                          className={`${ddRow} text-gray-700 hover:bg-indigo-50 hover:text-indigo-700`}>
                           <Pencil size={11} />რედაქტირება
                         </button>
-                        <button
-                          onClick={() => { closeDD(); deleteModule(mod.id); }}
-                          disabled={deleting === mod.id}
-                          className={`${ddItemDanger} disabled:opacity-40`}
-                        >
+                        <div className="border-t border-gray-100 my-1" />
+                        <button onClick={() => { closeDD(); deleteModule(mod.id); }}
+                          className={`${ddRow} text-red-600 hover:bg-red-50`}>
                           <Trash2 size={11} />წაშლა
                         </button>
                       </PortalMenu>
@@ -575,7 +621,7 @@ export function ModuleBuilder({ initialModules, courseId, canManage }: Props) {
                     : <ChevronRight size={12} className="text-gray-400 flex-shrink-0" />}
                 </div>
 
-                {/* Lesson rows */}
+                {/* lessons */}
                 {isOpen && (
                   <>
                     {mod.course_lessons.length === 0 && (
@@ -584,49 +630,121 @@ export function ModuleBuilder({ initialModules, courseId, canManage }: Props) {
                       </div>
                     )}
 
-                    {mod.course_lessons.map((lesson) => {
+                    {mod.course_lessons.map(lesson => {
                       const tc = typeConfig(lesson.lesson_type);
                       const Icon = tc.icon;
                       const isSelected = selectedLesson?.id === lesson.id;
+                      const isDraft    = !(lesson.is_published ?? true);
+                      const isCloning  = cloning === lesson.id;
+
                       return (
                         <div
                           key={lesson.id}
                           onClick={() => setSelectedLesson(lesson)}
                           className={[
                             'group/lrow flex items-center gap-2 px-3 py-2.5 border-t border-gray-100 cursor-pointer transition-colors',
-                            isSelected
-                              ? 'bg-indigo-50 border-l-2 border-l-indigo-500'
-                              : 'hover:bg-indigo-50/40',
+                            isSelected ? 'bg-indigo-50 border-l-2 border-l-indigo-500' : 'hover:bg-indigo-50/40',
                           ].join(' ')}
                         >
-                          <div className={`w-5 h-5 rounded flex items-center justify-center flex-shrink-0 ${tc.color}`}>
+                          {/* type icon */}
+                          <div className={`w-5 h-5 rounded flex items-center justify-center flex-shrink-0 ${isDraft ? 'opacity-40' : ''} ${tc.color}`}>
                             <Icon size={10} />
                           </div>
-                          <p className={`text-xs flex-1 truncate ${isSelected ? 'font-semibold text-indigo-700' : 'text-gray-700'}`}>
+
+                          {/* title */}
+                          <p className={[
+                            'text-xs flex-1 truncate',
+                            isSelected ? 'font-semibold text-indigo-700' :
+                            isDraft    ? 'text-gray-400 italic'          : 'text-gray-700',
+                          ].join(' ')}>
                             {lesson.title}
                           </p>
 
-                          {/* Lesson actions — portal dropdown */}
+                          {/* draft badge */}
+                          {isDraft && (
+                            <span className="text-[9px] font-semibold text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded flex-shrink-0">
+                              draft
+                            </span>
+                          )}
+
+                          {/* ⋮ actions — portal dropdown with all 6 items */}
                           {canManage && (
-                            <div className="opacity-0 group-hover/lrow:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}>
+                            <div
+                              className="opacity-0 group-hover/lrow:opacity-100 transition-opacity flex-shrink-0"
+                              onClick={e => e.stopPropagation()}
+                            >
                               <button
                                 onClick={e => openDD(`les-${lesson.id}`, e)}
-                                className="p-1 rounded text-gray-400 hover:text-indigo-600 hover:bg-indigo-100 transition-colors"
+                                disabled={isCloning}
+                                className="p-1 rounded text-gray-400 hover:text-indigo-600 hover:bg-indigo-100 transition-colors disabled:opacity-40"
                                 title="მოქმედებები"
                               >
                                 <MoreVertical size={12} />
                               </button>
+
                               <PortalMenu dd={dd} id={`les-${lesson.id}`} close={closeDD} rightAlign>
+                                {/* mini label */}
+                                <div className="px-3 pt-2 pb-1.5">
+                                  <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide truncate max-w-[160px]">
+                                    {lesson.title}
+                                  </p>
+                                </div>
+                                <div className="border-t border-gray-100" />
+
+                                {/* 1 — Lesson options */}
                                 <button
                                   onClick={() => { closeDD(); openEditLesson(lesson); }}
-                                  className={ddItemDefault}
+                                  className={`${ddRow} text-gray-700 hover:bg-indigo-50 hover:text-indigo-700`}
                                 >
-                                  <Pencil size={11} />რედაქტირება
+                                  <SlidersHorizontal size={11} />გაკვეთილის პარამეტრები
                                 </button>
+
+                                {/* 2 — Rename */}
                                 <button
-                                  onClick={() => { closeDD(); deleteLesson(lesson.id); }}
-                                  disabled={deleting === lesson.id}
-                                  className={`${ddItemDanger} disabled:opacity-40`}
+                                  onClick={() => openRenameLesson(lesson)}
+                                  className={`${ddRow} text-gray-700 hover:bg-indigo-50 hover:text-indigo-700`}
+                                >
+                                  <Pencil size={11} />სახელის შეცვლა
+                                </button>
+
+                                {/* 3 — Clone */}
+                                <button
+                                  onClick={() => cloneLesson(lesson)}
+                                  className={`${ddRow} text-gray-700 hover:bg-indigo-50 hover:text-indigo-700`}
+                                >
+                                  <Copy size={11} />დუბლირება
+                                </button>
+
+                                {/* 4 — Version history */}
+                                <button
+                                  onClick={() => { closeDD(); setHistoryModal(true); }}
+                                  className={`${ddRow} text-gray-700 hover:bg-indigo-50 hover:text-indigo-700`}
+                                >
+                                  <History size={11} />ვერსიების ისტორია
+                                </button>
+
+                                {/* 5 — Publish / Unpublish */}
+                                {isDraft ? (
+                                  <button
+                                    onClick={() => togglePublish(lesson)}
+                                    className={`${ddRow} text-emerald-600 hover:bg-emerald-50`}
+                                  >
+                                    <Eye size={11} />გამოქვეყნება
+                                  </button>
+                                ) : (
+                                  <button
+                                    onClick={() => togglePublish(lesson)}
+                                    className={`${ddRow} text-gray-700 hover:bg-indigo-50 hover:text-indigo-700`}
+                                  >
+                                    <EyeOff size={11} />გამოქვეყნების გაუქმება
+                                  </button>
+                                )}
+
+                                {/* 6 — Delete */}
+                                <div className="border-t border-gray-100 my-1" />
+                                <button
+                                  onClick={() => openDeleteConfirm(lesson)}
+                                  className={`${ddRow} text-red-600 hover:bg-red-50 mb-0.5`}
                                 >
                                   <Trash2 size={11} />წაშლა
                                 </button>
@@ -637,7 +755,7 @@ export function ModuleBuilder({ initialModules, courseId, canManage }: Props) {
                       );
                     })}
 
-                    {/* Module footer — add content (portal dropdown) */}
+                    {/* add content footer */}
                     {canManage && (
                       <div className="px-3 py-2 border-t border-gray-100 bg-gray-50/60 rounded-b-xl">
                         <button
@@ -654,7 +772,7 @@ export function ModuleBuilder({ initialModules, courseId, canManage }: Props) {
                         </button>
 
                         <PortalMenu dd={dd} id={`add-${mod.id}`} close={closeDD}>
-                          <div className="px-3 py-1.5 border-b border-gray-100">
+                          <div className="px-3 pt-2 pb-1.5 border-b border-gray-100">
                             <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide">გაკვეთილის ტიპი</p>
                           </div>
                           {LESSON_TYPES.map(lt => {
@@ -663,7 +781,7 @@ export function ModuleBuilder({ initialModules, courseId, canManage }: Props) {
                               <button
                                 key={lt.value}
                                 onClick={() => { closeDD(); openAddLesson(mod.id, lt.value); }}
-                                className="flex items-center gap-2.5 w-full px-3 py-2 text-xs text-gray-700 hover:bg-indigo-50 hover:text-indigo-700 transition-colors"
+                                className={`${ddRow} text-gray-700 hover:bg-indigo-50 hover:text-indigo-700`}
                               >
                                 <span className={`w-5 h-5 rounded-md flex items-center justify-center flex-shrink-0 ${lt.color}`}>
                                   <LIcon size={11} />
@@ -682,7 +800,7 @@ export function ModuleBuilder({ initialModules, courseId, canManage }: Props) {
           })}
         </div>
 
-        {/* Add section — pinned to bottom of left panel */}
+        {/* add section */}
         {canManage && modules.length > 0 && (
           <div className="p-3 border-t border-gray-200 bg-white flex-shrink-0">
             <button
@@ -695,12 +813,14 @@ export function ModuleBuilder({ initialModules, courseId, canManage }: Props) {
         )}
       </div>
 
-      {/* ── RIGHT PANEL: Content viewer ── */}
+      {/* ── RIGHT PANEL ── */}
       <div className="flex-1 min-w-0 bg-white overflow-y-auto">
         <RightPanel />
       </div>
 
-      {/* ── Section modal ─────────────────────────────────────────────── */}
+      {/* ════════════════════ MODALS ════════════════════ */}
+
+      {/* Section modal */}
       {modModal.open && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setModModal({ open: false, mode: 'add' })} />
@@ -715,14 +835,11 @@ export function ModuleBuilder({ initialModules, courseId, canManage }: Props) {
             </div>
             <form onSubmit={saveModule} className="p-6 space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                  სათაური <span className="text-red-400">*</span>
-                </label>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">სათაური <span className="text-red-400">*</span></label>
                 <input autoFocus type="text" value={modForm.title}
                   onChange={e => setModForm(p => ({ ...p, title: e.target.value }))}
                   placeholder="მაგ: შესავალი კურსში"
-                  className="w-full px-3.5 py-2.5 text-sm border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                />
+                  className="w-full px-3.5 py-2.5 text-sm border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent" />
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1.5">
@@ -731,8 +848,7 @@ export function ModuleBuilder({ initialModules, courseId, canManage }: Props) {
                 <textarea rows={3} value={modForm.description}
                   onChange={e => setModForm(p => ({ ...p, description: e.target.value }))}
                   placeholder="სექციის მოკლე აღწერა..."
-                  className="w-full px-3.5 py-2.5 text-sm border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-none"
-                />
+                  className="w-full px-3.5 py-2.5 text-sm border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-none" />
               </div>
               {error && (
                 <div className="flex items-center gap-2 text-xs text-red-600 bg-red-50 px-3 py-2 rounded-lg">
@@ -755,7 +871,7 @@ export function ModuleBuilder({ initialModules, courseId, canManage }: Props) {
         </div>
       )}
 
-      {/* ── Lesson modal ─────────────────────────────────────────────── */}
+      {/* Lesson edit modal */}
       {lesModal.open && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setLesModal({ open: false, mode: 'add' })} />
@@ -766,7 +882,7 @@ export function ModuleBuilder({ initialModules, courseId, canManage }: Props) {
               </div>
               <div className="min-w-0">
                 <h2 className="text-base font-semibold text-gray-900">
-                  {lesModal.mode === 'add' ? 'ახალი გაკვეთილი' : 'გაკვეთილის რედაქტირება'}
+                  {lesModal.mode === 'add' ? 'ახალი გაკვეთილი' : 'გაკვეთილის პარამეტრები'}
                 </h2>
                 {lesModal.moduleId && (() => {
                   const parentMod = modules.find(m => m.id === lesModal.moduleId);
@@ -776,14 +892,11 @@ export function ModuleBuilder({ initialModules, courseId, canManage }: Props) {
             </div>
             <form id="lesson-form" onSubmit={saveLesson} className="p-6 space-y-4 overflow-y-auto flex-1">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                  სათაური <span className="text-red-400">*</span>
-                </label>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">სათაური <span className="text-red-400">*</span></label>
                 <input autoFocus type="text" value={lesForm.title}
                   onChange={e => setLesForm(p => ({ ...p, title: e.target.value }))}
                   placeholder="მაგ: კომპანიის ისტორია"
-                  className="w-full px-3.5 py-2.5 text-sm border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                />
+                  className="w-full px-3.5 py-2.5 text-sm border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent" />
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">ტიპი</label>
@@ -810,8 +923,7 @@ export function ModuleBuilder({ initialModules, courseId, canManage }: Props) {
                   <textarea rows={5} value={lesForm.content}
                     onChange={e => setLesForm(p => ({ ...p, content: e.target.value }))}
                     placeholder="გაკვეთილის ტექსტი..."
-                    className="w-full px-3.5 py-2.5 text-sm border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-none"
-                  />
+                    className="w-full px-3.5 py-2.5 text-sm border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-none" />
                 </div>
               )}
               {lesForm.lesson_type === 'video' && (
@@ -820,8 +932,7 @@ export function ModuleBuilder({ initialModules, courseId, canManage }: Props) {
                   <input type="url" value={lesForm.video_url}
                     onChange={e => setLesForm(p => ({ ...p, video_url: e.target.value }))}
                     placeholder="https://..."
-                    className="w-full px-3.5 py-2.5 text-sm border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                  />
+                    className="w-full px-3.5 py-2.5 text-sm border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent" />
                 </div>
               )}
               {(lesForm.lesson_type === 'pdf' || lesForm.lesson_type === 'assignment') && (
@@ -830,8 +941,7 @@ export function ModuleBuilder({ initialModules, courseId, canManage }: Props) {
                   <input type="url" value={lesForm.file_url}
                     onChange={e => setLesForm(p => ({ ...p, file_url: e.target.value }))}
                     placeholder="https://..."
-                    className="w-full px-3.5 py-2.5 text-sm border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                  />
+                    className="w-full px-3.5 py-2.5 text-sm border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent" />
                 </div>
               )}
               {lesForm.lesson_type === 'quiz' && (
@@ -844,8 +954,7 @@ export function ModuleBuilder({ initialModules, courseId, canManage }: Props) {
                   <label className="block text-sm font-medium text-gray-700 mb-1.5">ხანგრძლივობა (წთ)</label>
                   <input type="number" min={0} value={lesForm.duration_minutes}
                     onChange={e => setLesForm(p => ({ ...p, duration_minutes: parseInt(e.target.value) || 0 }))}
-                    className="w-full px-3.5 py-2.5 text-sm border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                  />
+                    className="w-full px-3.5 py-2.5 text-sm border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent" />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1.5">სავალდებულო</label>
@@ -872,6 +981,112 @@ export function ModuleBuilder({ initialModules, courseId, canManage }: Props) {
                 className="flex-1 py-2.5 text-sm font-semibold text-white bg-indigo-600 rounded-xl hover:bg-indigo-700 disabled:opacity-50 transition-colors flex items-center justify-center gap-2">
                 {loading && <Spinner />}
                 {loading ? 'ინახება...' : lesModal.mode === 'add' ? 'შექმნა' : 'შენახვა'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Rename modal ── */}
+      {renameModal.open && renameModal.lesson && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setRenameModal({ open: false, lesson: null })} />
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden">
+            <div className="flex items-center gap-3 px-6 py-5 border-b border-gray-100">
+              <div className="w-9 h-9 rounded-xl bg-indigo-50 flex items-center justify-center">
+                <Pencil size={16} className="text-indigo-600" />
+              </div>
+              <h2 className="text-base font-semibold text-gray-900">სახელის შეცვლა</h2>
+            </div>
+            <div className="p-6 space-y-4">
+              <input
+                autoFocus
+                type="text"
+                value={renameTitle}
+                onChange={e => setRenameTitle(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); saveRename(); } }}
+                className="w-full px-3.5 py-2.5 text-sm border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+              />
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setRenameModal({ open: false, lesson: null })}
+                  className="flex-1 py-2.5 text-sm font-medium text-gray-600 bg-white border border-gray-300 rounded-xl hover:bg-gray-50 transition-colors"
+                >
+                  გაუქმება
+                </button>
+                <button
+                  onClick={saveRename}
+                  disabled={renameLoading || !renameTitle.trim()}
+                  className="flex-1 py-2.5 text-sm font-semibold text-white bg-indigo-600 rounded-xl hover:bg-indigo-700 disabled:opacity-50 transition-colors flex items-center justify-center gap-2"
+                >
+                  {renameLoading && <Spinner />}
+                  {renameLoading ? 'ინახება...' : 'შენახვა'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Delete confirmation modal ── */}
+      {deleteModal.open && deleteModal.lesson && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setDeleteModal({ open: false, lesson: null })} />
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden">
+            <div className="p-6">
+              <div className="w-12 h-12 rounded-xl bg-red-50 flex items-center justify-center mb-4">
+                <Trash2 size={22} className="text-red-500" />
+              </div>
+              <h2 className="text-base font-semibold text-gray-900 mb-1">გაკვეთილის წაშლა?</h2>
+              <p className="text-sm text-gray-500 mb-1 leading-relaxed">
+                <span className="font-semibold text-gray-700">„{deleteModal.lesson.title}"</span> სამუდამოდ წაიშლება.
+              </p>
+              <p className="text-xs text-gray-400 mb-6">ამ მოქმედების გაუქმება შეუძლებელია.</p>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setDeleteModal({ open: false, lesson: null })}
+                  className="flex-1 py-2.5 text-sm font-medium text-gray-600 bg-white border border-gray-300 rounded-xl hover:bg-gray-50 transition-colors"
+                >
+                  გაუქმება
+                </button>
+                <button
+                  onClick={confirmDelete}
+                  disabled={deleteLoading}
+                  className="flex-1 py-2.5 text-sm font-semibold text-white bg-red-600 rounded-xl hover:bg-red-700 disabled:opacity-50 transition-colors flex items-center justify-center gap-2"
+                >
+                  {deleteLoading && <Spinner />}
+                  {deleteLoading ? 'იშლება...' : 'წაშლა'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Version history placeholder modal ── */}
+      {historyModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setHistoryModal(false)} />
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden">
+            <div className="flex items-center gap-3 px-6 py-5 border-b border-gray-100">
+              <div className="w-9 h-9 rounded-xl bg-gray-50 flex items-center justify-center">
+                <History size={16} className="text-gray-500" />
+              </div>
+              <h2 className="text-base font-semibold text-gray-900">ვერსიების ისტორია</h2>
+            </div>
+            <div className="p-6 text-center">
+              <div className="w-14 h-14 rounded-2xl bg-gray-50 flex items-center justify-center mx-auto mb-4">
+                <History size={26} className="text-gray-300" />
+              </div>
+              <p className="text-sm font-medium text-gray-600 mb-1">ვერსიების ისტორია მალე დაემატება.</p>
+              <p className="text-xs text-gray-400 leading-relaxed">
+                ყოველი შენახვის ავტომატური snapshot და rollback შესაძლებლობა.
+              </p>
+              <button
+                onClick={() => setHistoryModal(false)}
+                className="mt-6 px-6 py-2.5 text-sm font-medium text-gray-600 bg-white border border-gray-300 rounded-xl hover:bg-gray-50 transition-colors"
+              >
+                დახურვა
               </button>
             </div>
           </div>
