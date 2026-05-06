@@ -31,7 +31,7 @@ export default async function LearnPage({ params }: Props) {
     supabase.from('courses').select('id, title, status').eq('id', courseId).single(),
     supabase
       .from('course_modules')
-      .select('id, title, sort_order, course_lessons(id, title, lesson_type, content, video_url, file_url, sort_order, is_required, duration_minutes)')
+      .select('id, title, sort_order, course_lessons(id, title, lesson_type, content, video_url, file_url, sort_order, is_required, duration_minutes, completion_method, control_question, control_answer)')
       .eq('course_id', courseId)
       .order('sort_order')
       .order('sort_order', { referencedTable: 'course_lessons' }),

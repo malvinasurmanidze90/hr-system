@@ -6,7 +6,7 @@ import {
   ChevronDown, ChevronRight, Plus, Pencil, Trash2,
   FileText, Video, File, HelpCircle, CheckSquare, ClipboardList,
   AlertCircle, Layers, BookOpen, ExternalLink, PlayCircle,
-  MoreVertical, SlidersHorizontal, Copy, History, Eye, EyeOff,
+  MoreVertical, SlidersHorizontal, Copy, History, Eye, EyeOff, CheckCircle2,
 } from 'lucide-react';
 
 /* ── Types ─────────────────────────────────────────────────────────── */
@@ -21,7 +21,10 @@ interface CLesson {
   sort_order: number;
   is_required: boolean;
   duration_minutes: number;
-  is_published?: boolean; // requires migration 009_lesson_published.sql
+  is_published?: boolean;
+  completion_method?: string;   // 'button' | 'control_question'
+  control_question?: string | null;
+  control_answer?: string | null;
 }
 interface CModule {
   id: string;
@@ -50,7 +53,7 @@ function typeConfig(t: string) { return LESSON_TYPES.find(x => x.value === t) ??
 
 /* ── Defaults ───────────────────────────────────────────────────────── */
 const MOD_DEF = { title: '', description: '' };
-const LES_DEF = { title: '', lesson_type: 'text', content: '', video_url: '', file_url: '', duration_minutes: 0, is_required: true };
+const LES_DEF = { title: '', lesson_type: 'text', content: '', video_url: '', file_url: '', duration_minutes: 0, is_required: true, completion_method: 'button', control_question: '', control_answer: '' };
 
 /* ── Spinner ─────────────────────────────────────────────────────────── */
 const Spinner = () => (
@@ -201,6 +204,9 @@ export function ModuleBuilder({ initialModules, courseId, canManage }: Props) {
       content: lesson.content ?? '', video_url: lesson.video_url ?? '',
       file_url: lesson.file_url ?? '', duration_minutes: lesson.duration_minutes,
       is_required: lesson.is_required,
+      completion_method: lesson.completion_method ?? 'button',
+      control_question:  lesson.control_question ?? '',
+      control_answer:    lesson.control_answer   ?? '',
     });
     setError('');
     setLesModal({ open: true, mode: 'edit', moduleId: lesson.module_id, lesson });
@@ -217,15 +223,18 @@ export function ModuleBuilder({ initialModules, courseId, canManage }: Props) {
       const { data: inserted, error: err } = await sb
         .from('course_lessons')
         .insert({
-          module_id:        lesModal.moduleId,
-          title:            lesForm.title.trim(),
-          lesson_type:      lesForm.lesson_type,
-          content:          lesForm.content.trim() || null,
-          video_url:        lesForm.video_url.trim() || null,
-          file_url:         lesForm.file_url.trim() || null,
-          sort_order:       nextOrder,
-          duration_minutes: lesForm.duration_minutes,
-          is_required:      lesForm.is_required,
+          module_id:         lesModal.moduleId,
+          title:             lesForm.title.trim(),
+          lesson_type:       lesForm.lesson_type,
+          content:           lesForm.content.trim() || null,
+          video_url:         lesForm.video_url.trim() || null,
+          file_url:          lesForm.file_url.trim() || null,
+          sort_order:        nextOrder,
+          duration_minutes:  lesForm.duration_minutes,
+          is_required:       lesForm.is_required,
+          completion_method: lesForm.completion_method,
+          control_question:  lesForm.completion_method === 'control_question' ? lesForm.control_question.trim() || null : null,
+          control_answer:    lesForm.completion_method === 'control_question' ? lesForm.control_answer.trim()   || null : null,
         })
         .select().single();
       setLoading(false);
@@ -241,13 +250,16 @@ export function ModuleBuilder({ initialModules, courseId, canManage }: Props) {
       const { error: err } = await sb
         .from('course_lessons')
         .update({
-          title:            lesForm.title.trim(),
-          lesson_type:      lesForm.lesson_type,
-          content:          lesForm.content.trim() || null,
-          video_url:        lesForm.video_url.trim() || null,
-          file_url:         lesForm.file_url.trim() || null,
-          duration_minutes: lesForm.duration_minutes,
-          is_required:      lesForm.is_required,
+          title:             lesForm.title.trim(),
+          lesson_type:       lesForm.lesson_type,
+          content:           lesForm.content.trim() || null,
+          video_url:         lesForm.video_url.trim() || null,
+          file_url:          lesForm.file_url.trim() || null,
+          duration_minutes:  lesForm.duration_minutes,
+          is_required:       lesForm.is_required,
+          completion_method: lesForm.completion_method,
+          control_question:  lesForm.completion_method === 'control_question' ? lesForm.control_question.trim() || null : null,
+          control_answer:    lesForm.completion_method === 'control_question' ? lesForm.control_answer.trim()   || null : null,
         })
         .eq('id', lesModal.lesson.id);
       setLoading(false);
@@ -297,15 +309,18 @@ export function ModuleBuilder({ initialModules, courseId, canManage }: Props) {
     const { data: inserted, error: err } = await sb
       .from('course_lessons')
       .insert({
-        module_id:        lesson.module_id,
-        title:            `${lesson.title} (ასლი)`,
-        lesson_type:      lesson.lesson_type,
-        content:          lesson.content,
-        video_url:        lesson.video_url,
-        file_url:         lesson.file_url,
-        sort_order:       nextOrder,
-        duration_minutes: lesson.duration_minutes,
-        is_required:      lesson.is_required,
+        module_id:         lesson.module_id,
+        title:             `${lesson.title} (ასლი)`,
+        lesson_type:       lesson.lesson_type,
+        content:           lesson.content,
+        video_url:         lesson.video_url,
+        file_url:          lesson.file_url,
+        sort_order:        nextOrder,
+        duration_minutes:  lesson.duration_minutes,
+        is_required:       lesson.is_required,
+        completion_method: lesson.completion_method ?? 'button',
+        control_question:  lesson.control_question ?? null,
+        control_answer:    lesson.control_answer   ?? null,
       })
       .select().single();
     setCloning(null);
@@ -966,6 +981,71 @@ export function ModuleBuilder({ initialModules, courseId, canManage }: Props) {
                   </button>
                 </div>
               </div>
+              {/* ── Completion method ── */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">დასრულების მეთოდი</label>
+                <div className="grid grid-cols-2 gap-2">
+                  {/* Button */}
+                  <button
+                    type="button"
+                    onClick={() => setLesForm(p => ({ ...p, completion_method: 'button' }))}
+                    className={`flex flex-col items-start gap-1.5 p-3 rounded-xl border-2 transition-all text-left ${
+                      lesForm.completion_method !== 'control_question'
+                        ? 'border-indigo-500 bg-indigo-50'
+                        : 'border-gray-200 hover:border-gray-300'
+                    }`}
+                  >
+                    <CheckCircle2 size={15} className={lesForm.completion_method !== 'control_question' ? 'text-indigo-600' : 'text-gray-400'} />
+                    <span className={`text-xs font-semibold ${lesForm.completion_method !== 'control_question' ? 'text-indigo-700' : 'text-gray-600'}`}>
+                      ღილაკით
+                    </span>
+                    <span className="text-[10px] text-gray-400 leading-tight">„დასრულება" ღილაკი</span>
+                  </button>
+                  {/* Control question */}
+                  <button
+                    type="button"
+                    onClick={() => setLesForm(p => ({ ...p, completion_method: 'control_question' }))}
+                    className={`flex flex-col items-start gap-1.5 p-3 rounded-xl border-2 transition-all text-left ${
+                      lesForm.completion_method === 'control_question'
+                        ? 'border-indigo-500 bg-indigo-50'
+                        : 'border-gray-200 hover:border-gray-300'
+                    }`}
+                  >
+                    <HelpCircle size={15} className={lesForm.completion_method === 'control_question' ? 'text-indigo-600' : 'text-gray-400'} />
+                    <span className={`text-xs font-semibold ${lesForm.completion_method === 'control_question' ? 'text-indigo-700' : 'text-gray-600'}`}>
+                      საკონტ. კითხვა
+                    </span>
+                    <span className="text-[10px] text-gray-400 leading-tight">სწორი პასუხის შემდეგ</span>
+                  </button>
+                </div>
+
+                {lesForm.completion_method === 'control_question' && (
+                  <div className="mt-3 p-4 bg-indigo-50 border border-indigo-200 rounded-xl space-y-3">
+                    <div>
+                      <label className="block text-xs font-semibold text-indigo-700 mb-1.5">კითხვა</label>
+                      <input
+                        type="text"
+                        value={lesForm.control_question}
+                        onChange={e => setLesForm(p => ({ ...p, control_question: e.target.value }))}
+                        placeholder="მაგ: რომელი წელს დაარსდა კომპანია?"
+                        className="w-full px-3 py-2 text-sm border border-indigo-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-indigo-700 mb-1.5">სწორი პასუხი</label>
+                      <input
+                        type="text"
+                        value={lesForm.control_answer}
+                        onChange={e => setLesForm(p => ({ ...p, control_answer: e.target.value }))}
+                        placeholder="მაგ: 2010"
+                        className="w-full px-3 py-2 text-sm border border-indigo-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                      />
+                      <p className="text-[10px] text-indigo-500 mt-1">პასუხი case-insensitive შემოწმდება.</p>
+                    </div>
+                  </div>
+                )}
+              </div>
+
               {error && (
                 <div className="flex items-center gap-2 text-xs text-red-600 bg-red-50 px-3 py-2 rounded-lg">
                   <AlertCircle size={13} />{error}

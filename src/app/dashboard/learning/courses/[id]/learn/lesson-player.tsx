@@ -5,7 +5,7 @@ import {
   ChevronDown, ChevronRight, CheckCircle2, Circle,
   FileText, Video, File, HelpCircle, CheckSquare, ClipboardList,
   ChevronLeft, ChevronRight as ChevronRightNav, ExternalLink, PlayCircle,
-  BookOpen, Layers,
+  BookOpen, Layers, AlertCircle, Send,
 } from 'lucide-react';
 
 /* ── Types ─────────────────────────────────────────────────────────── */
@@ -19,6 +19,9 @@ interface Lesson {
   sort_order: number;
   is_required: boolean;
   duration_minutes: number;
+  completion_method?: 'button' | 'control_question';
+  control_question?: string | null;
+  control_answer?: string | null;
 }
 interface Module {
   id: string;
@@ -38,12 +41,12 @@ interface Props {
 
 /* ── Lesson type config ─────────────────────────────────────────────── */
 const TYPE_MAP: Record<string, { label: string; icon: React.ElementType; badge: string }> = {
-  text:            { label: 'სტატია',    icon: FileText,      badge: 'bg-blue-100 text-blue-700' },
-  video:           { label: 'ვიდეო',     icon: Video,         badge: 'bg-purple-100 text-purple-700' },
-  pdf:             { label: 'PDF',        icon: File,          badge: 'bg-red-100 text-red-700' },
-  quiz:            { label: 'ტესტი',     icon: HelpCircle,    badge: 'bg-amber-100 text-amber-700' },
-  acknowledgement: { label: 'დასტური',   icon: CheckSquare,   badge: 'bg-green-100 text-green-700' },
-  assignment:      { label: 'დავალება',  icon: ClipboardList, badge: 'bg-indigo-100 text-indigo-700' },
+  text:            { label: 'სტატია',   icon: FileText,      badge: 'bg-blue-100 text-blue-700' },
+  video:           { label: 'ვიდეო',    icon: Video,         badge: 'bg-purple-100 text-purple-700' },
+  pdf:             { label: 'PDF',       icon: File,          badge: 'bg-red-100 text-red-700' },
+  quiz:            { label: 'ტესტი',    icon: HelpCircle,    badge: 'bg-amber-100 text-amber-700' },
+  acknowledgement: { label: 'დასტური',  icon: CheckSquare,   badge: 'bg-green-100 text-green-700' },
+  assignment:      { label: 'დავალება', icon: ClipboardList, badge: 'bg-indigo-100 text-indigo-700' },
 };
 function typeConf(t: string) { return TYPE_MAP[t] ?? TYPE_MAP.text; }
 
@@ -78,24 +81,34 @@ export function LessonPlayer({
   isEnrolled,
   isAdmin,
 }: Props) {
-  const flatLessons = modules.flatMap(m => m.course_lessons);
+  const flatLessons  = modules.flatMap(m => m.course_lessons);
   const totalLessons = flatLessons.length;
 
-  // Default to first incomplete lesson, else first lesson
   const firstIncomplete = flatLessons.find(l => !initialCompletedIds.includes(l.id));
-  const defaultLesson = firstIncomplete ?? flatLessons[0] ?? null;
+  const defaultLesson   = firstIncomplete ?? flatLessons[0] ?? null;
 
   const [current, setCurrent]           = useState<Lesson | null>(defaultLesson);
   const [completedIds, setCompletedIds] = useState<Set<string>>(new Set(initialCompletedIds));
   const [expanded, setExpanded]         = useState<Set<string>>(new Set(modules.map(m => m.id)));
   const [marking, setMarking]           = useState(false);
   const [acknowledged, setAcknowledged] = useState(false);
+  const [controlAnswer, setControlAnswer] = useState('');
+  const [controlError, setControlError]   = useState('');
+  const [controlChecking, setControlChecking] = useState(false);
 
   const currentIndex = current ? flatLessons.findIndex(l => l.id === current.id) : -1;
-  const prevLesson = currentIndex > 0 ? flatLessons[currentIndex - 1] : null;
-  const nextLesson = currentIndex < flatLessons.length - 1 ? flatLessons[currentIndex + 1] : null;
-  const isCompleted = current ? completedIds.has(current.id) : false;
-  const progress = totalLessons > 0 ? Math.round((completedIds.size / totalLessons) * 100) : 0;
+  const prevLesson   = currentIndex > 0 ? flatLessons[currentIndex - 1] : null;
+  const nextLesson   = currentIndex < flatLessons.length - 1 ? flatLessons[currentIndex + 1] : null;
+  const isCompleted  = current ? completedIds.has(current.id) : false;
+  const progress     = totalLessons > 0 ? Math.round((completedIds.size / totalLessons) * 100) : 0;
+
+  /* convenience: reset per-lesson transient state when navigating */
+  const navigate = (lesson: Lesson) => {
+    setCurrent(lesson);
+    setAcknowledged(false);
+    setControlAnswer('');
+    setControlError('');
+  };
 
   const toggleExpand = (id: string) => setExpanded(prev => {
     const next = new Set(prev);
@@ -119,7 +132,7 @@ export function LessonPlayer({
     const newCompleted = new Set([...completedIds, current.id]);
     setCompletedIds(newCompleted);
 
-    const newPct = totalLessons > 0 ? Math.round((newCompleted.size / totalLessons) * 100) : 0;
+    const newPct    = totalLessons > 0 ? Math.round((newCompleted.size / totalLessons) * 100) : 0;
     const newStatus = newPct >= 100 ? 'completed' : 'in_progress';
 
     if (enrollmentId) {
@@ -131,12 +144,28 @@ export function LessonPlayer({
     }
 
     setMarking(false);
-    // Auto-advance to next lesson
     if (nextLesson) {
       setCurrent(nextLesson);
       setAcknowledged(false);
+      setControlAnswer('');
+      setControlError('');
     }
   }, [current, isEnrolled, marking, completedIds, totalLessons, enrollmentId, nextLesson, userId]);
+
+  /* ── Check control question answer ─────────────────────────────── */
+  const checkControlAnswer = useCallback(async () => {
+    if (!current?.control_answer?.trim() || !controlAnswer.trim() || marking || controlChecking) return;
+    setControlChecking(true);
+    const given   = controlAnswer.trim().toLowerCase();
+    const correct = current.control_answer.trim().toLowerCase();
+    if (given === correct) {
+      setControlError('');
+      await markComplete();
+    } else {
+      setControlError('პასუხი სწორი არ არის. სცადეთ ისევ.');
+    }
+    setControlChecking(false);
+  }, [current, controlAnswer, marking, controlChecking, markComplete]);
 
   /* ── Content viewer ─────────────────────────────────────────────── */
   const ContentView = () => {
@@ -154,6 +183,9 @@ export function LessonPlayer({
 
     const conf = typeConf(current.lesson_type);
     const Icon = conf.icon;
+    const useControlQ = (current.completion_method ?? 'button') === 'control_question'
+      && !!current.control_question?.trim()
+      && !!current.control_answer?.trim();
 
     return (
       <div className="flex flex-col h-full">
@@ -194,23 +226,15 @@ export function LessonPlayer({
                   const embed = youtubeEmbed(current.video_url);
                   return embed ? (
                     <div className="aspect-video rounded-2xl overflow-hidden border border-gray-200 shadow-sm">
-                      <iframe
-                        src={embed}
-                        title={current.title}
-                        className="w-full h-full"
+                      <iframe src={embed} title={current.title} className="w-full h-full"
                         allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                        allowFullScreen
-                      />
+                        allowFullScreen />
                     </div>
                   ) : (
                     <div className="aspect-video bg-gray-900 rounded-2xl flex flex-col items-center justify-center gap-3">
                       <PlayCircle size={48} className="text-white/30" />
-                      <a
-                        href={current.video_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center gap-1.5 text-sm text-white/60 hover:text-white transition-colors"
-                      >
+                      <a href={current.video_url} target="_blank" rel="noopener noreferrer"
+                        className="flex items-center gap-1.5 text-sm text-white/60 hover:text-white transition-colors">
                         <ExternalLink size={13} />ვიდეოს გახსნა ახალ ჩანართში
                       </a>
                     </div>
@@ -228,12 +252,8 @@ export function LessonPlayer({
           {current.lesson_type === 'pdf' && (
             current.file_url ? (
               <div className="space-y-3">
-                <a
-                  href={current.file_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center gap-3 p-4 bg-red-50 border border-red-200 rounded-xl hover:bg-red-100 transition-colors group"
-                >
+                <a href={current.file_url} target="_blank" rel="noopener noreferrer"
+                  className="flex items-center gap-3 p-4 bg-red-50 border border-red-200 rounded-xl hover:bg-red-100 transition-colors group">
                   <div className="w-10 h-10 rounded-xl bg-red-100 flex items-center justify-center flex-shrink-0">
                     <File size={18} className="text-red-600" />
                   </div>
@@ -261,16 +281,12 @@ export function LessonPlayer({
                   {current.content}
                 </div>
               )}
-              {isEnrolled && !isCompleted && (
+              {isEnrolled && !isCompleted && (current.completion_method ?? 'button') === 'button' && (
                 <label className={`flex items-start gap-3 p-4 rounded-xl border-2 cursor-pointer transition-all ${
                   acknowledged ? 'border-emerald-400 bg-emerald-50' : 'border-gray-300 bg-white hover:border-emerald-300'
                 }`}>
-                  <input
-                    type="checkbox"
-                    checked={acknowledged}
-                    onChange={e => setAcknowledged(e.target.checked)}
-                    className="mt-0.5 w-4 h-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
-                  />
+                  <input type="checkbox" checked={acknowledged} onChange={e => setAcknowledged(e.target.checked)}
+                    className="mt-0.5 w-4 h-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500" />
                   <span className="text-sm text-gray-700 leading-relaxed">
                     ვადასტურებ, რომ გავეცანი და გავიგე ამ მასალის შინაარსი.
                   </span>
@@ -296,12 +312,8 @@ export function LessonPlayer({
                 </div>
               )}
               {current.file_url && (
-                <a
-                  href={current.file_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center gap-3 p-4 bg-indigo-50 border border-indigo-200 rounded-xl hover:bg-indigo-100 transition-colors group"
-                >
+                <a href={current.file_url} target="_blank" rel="noopener noreferrer"
+                  className="flex items-center gap-3 p-4 bg-indigo-50 border border-indigo-200 rounded-xl hover:bg-indigo-100 transition-colors group">
                   <div className="w-10 h-10 rounded-xl bg-indigo-100 flex items-center justify-center flex-shrink-0">
                     <File size={18} className="text-indigo-600" />
                   </div>
@@ -323,10 +335,58 @@ export function LessonPlayer({
               <HelpCircle size={20} className="text-amber-500 flex-shrink-0 mt-0.5" />
               <div>
                 <p className="text-sm font-semibold text-amber-800 mb-1">ტესტი</p>
-                <p className="text-sm text-amber-700">
-                  ამ გაკვეთილის ტესტი „ქვიზები" ჩანართიდან ხელმისაწვდომია.
-                </p>
+                <p className="text-sm text-amber-700">ამ გაკვეთილის ტესტი „ქვიზები" ჩანართიდან ხელმისაწვდომია.</p>
               </div>
+            </div>
+          )}
+
+          {/* ── Control question completion gate ───────────────────────
+               Shown when the lesson requires a correct answer to advance.
+               Sits inside the scrollable body so it's always reachable.
+               ─────────────────────────────────────────────────────── */}
+          {isEnrolled && !isCompleted && useControlQ && (
+            <div className="rounded-2xl border-2 border-indigo-200 bg-indigo-50 p-5 space-y-3">
+              {/* Question */}
+              <div className="flex items-start gap-2.5">
+                <div className="w-7 h-7 rounded-lg bg-indigo-600 flex items-center justify-center flex-shrink-0 shadow-sm mt-0.5">
+                  <HelpCircle size={14} className="text-white" />
+                </div>
+                <div>
+                  <p className="text-[10px] font-bold text-indigo-400 uppercase tracking-wide mb-0.5">
+                    საკონტროლო კითხვა
+                  </p>
+                  <p className="text-sm font-semibold text-indigo-900 leading-snug">
+                    {current.control_question}
+                  </p>
+                </div>
+              </div>
+
+              {/* Answer input */}
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={controlAnswer}
+                  onChange={e => { setControlAnswer(e.target.value); setControlError(''); }}
+                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); checkControlAnswer(); } }}
+                  placeholder="თქვენი პასუხი..."
+                  className="flex-1 px-3.5 py-2 text-sm border border-indigo-300 bg-white rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                />
+                <button
+                  onClick={checkControlAnswer}
+                  disabled={!controlAnswer.trim() || marking || controlChecking}
+                  className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-sm"
+                >
+                  {(marking || controlChecking) ? <Spinner /> : <Send size={13} />}
+                  შემოწმება
+                </button>
+              </div>
+
+              {/* Error */}
+              {controlError && (
+                <div className="flex items-center gap-1.5 text-xs text-red-600">
+                  <AlertCircle size={12} />{controlError}
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -336,23 +396,30 @@ export function LessonPlayer({
 
           {/* Prev */}
           <button
-            onClick={() => { if (prevLesson) { setCurrent(prevLesson); setAcknowledged(false); } }}
+            onClick={() => { if (prevLesson) navigate(prevLesson); }}
             disabled={!prevLesson}
             className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-gray-600 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           >
             <ChevronLeft size={15} />წინა
           </button>
 
-          {/* Mark complete / completed indicator */}
+          {/* Center: mark complete OR control-question hint */}
           {isEnrolled && (
             <div className="flex-1 flex justify-center">
               {isCompleted ? (
                 <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-emerald-600">
                   <CheckCircle2 size={16} />დასრულებული
                 </span>
+              ) : useControlQ ? (
+                /* hint — actual completion gate is the question block above */
+                <span className="text-xs text-indigo-400 flex items-center gap-1">
+                  <HelpCircle size={12} />უპასუხეთ კითხვას დასასრულებლად
+                </span>
               ) : (
                 <button
-                  onClick={current.lesson_type === 'acknowledgement' && !acknowledged ? undefined : markComplete}
+                  onClick={
+                    current.lesson_type === 'acknowledgement' && !acknowledged ? undefined : markComplete
+                  }
                   disabled={marking || (current.lesson_type === 'acknowledgement' && !acknowledged)}
                   className="flex items-center gap-2 px-5 py-2 text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-sm"
                 >
@@ -365,7 +432,7 @@ export function LessonPlayer({
 
           {/* Next */}
           <button
-            onClick={() => { if (nextLesson) { setCurrent(nextLesson); setAcknowledged(false); } }}
+            onClick={() => { if (nextLesson) navigate(nextLesson); }}
             disabled={!nextLesson}
             className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 border border-indigo-600 rounded-xl disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           >
@@ -392,10 +459,9 @@ export function LessonPlayer({
   return (
     <div className="flex flex-1 overflow-hidden">
 
-      {/* ── LEFT: Sidebar with progress + module tree ── */}
+      {/* ── LEFT: Sidebar ── */}
       <div className="w-[280px] xl:w-[300px] flex-shrink-0 border-r border-gray-200 bg-white flex flex-col overflow-hidden">
 
-        {/* Progress bar */}
         {isEnrolled && (
           <div className="px-4 py-3 border-b border-gray-100 bg-gray-50/60">
             <div className="flex items-center justify-between text-xs mb-1.5">
@@ -408,21 +474,16 @@ export function LessonPlayer({
                 style={{ width: `${progress}%` }}
               />
             </div>
-            <p className="text-[10px] text-gray-400 mt-1">
-              {completedIds.size} / {totalLessons} გაკვეთილი
-            </p>
+            <p className="text-[10px] text-gray-400 mt-1">{completedIds.size} / {totalLessons} გაკვეთილი</p>
           </div>
         )}
 
-        {/* Module accordion */}
         <div className="flex-1 overflow-y-auto p-2 space-y-1">
           {modules.map((mod, mIdx) => {
             const isOpen = expanded.has(mod.id);
             const modCompleted = mod.course_lessons.filter(l => completedIds.has(l.id)).length;
             return (
               <div key={mod.id} className="rounded-xl overflow-hidden border border-gray-200">
-
-                {/* Module header */}
                 <button
                   onClick={() => toggleExpand(mod.id)}
                   className="w-full flex items-center gap-2 px-3 py-2.5 bg-gray-50 hover:bg-gray-100 transition-colors"
@@ -431,30 +492,26 @@ export function LessonPlayer({
                     {String(mIdx + 1).padStart(2, '0')}
                   </span>
                   <span className="text-xs font-semibold text-gray-800 flex-1 text-left truncate">{mod.title}</span>
-                  <span className="text-[10px] text-gray-400 flex-shrink-0">
-                    {modCompleted}/{mod.course_lessons.length}
-                  </span>
+                  <span className="text-[10px] text-gray-400 flex-shrink-0">{modCompleted}/{mod.course_lessons.length}</span>
                   {isOpen
                     ? <ChevronDown size={11} className="text-gray-400 flex-shrink-0" />
-                    : <ChevronRight size={11} className="text-gray-400 flex-shrink-0" />
-                  }
+                    : <ChevronRight size={11} className="text-gray-400 flex-shrink-0" />}
                 </button>
 
-                {/* Lessons */}
                 {isOpen && mod.course_lessons.map(lesson => {
-                  const done = completedIds.has(lesson.id);
+                  const done   = completedIds.has(lesson.id);
                   const isCurr = current?.id === lesson.id;
-                  const conf = typeConf(lesson.lesson_type);
-                  const Icon = conf.icon;
+                  const conf   = typeConf(lesson.lesson_type);
+                  const Icon   = conf.icon;
+                  const hasQ   = (lesson.completion_method ?? 'button') === 'control_question'
+                    && !!lesson.control_question?.trim();
                   return (
                     <button
                       key={lesson.id}
-                      onClick={() => { setCurrent(lesson); setAcknowledged(false); }}
+                      onClick={() => navigate(lesson)}
                       className={[
                         'w-full flex items-center gap-2 px-3 py-2 border-t border-gray-100 text-left transition-colors',
-                        isCurr
-                          ? 'bg-indigo-50 border-l-2 border-l-indigo-500'
-                          : 'hover:bg-gray-50',
+                        isCurr ? 'bg-indigo-50 border-l-2 border-l-indigo-500' : 'hover:bg-gray-50',
                       ].join(' ')}
                     >
                       {done
@@ -465,6 +522,9 @@ export function LessonPlayer({
                       <span className={`text-xs truncate flex-1 ${isCurr ? 'font-semibold text-indigo-700' : done ? 'text-gray-500' : 'text-gray-700'}`}>
                         {lesson.title}
                       </span>
+                      {hasQ && !done && (
+                        <HelpCircle size={10} className={`flex-shrink-0 ${isCurr ? 'text-indigo-400' : 'text-gray-300'}`} />
+                      )}
                     </button>
                   );
                 })}
