@@ -1,7 +1,8 @@
 'use client';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { HelpCircle, Plus, Trash2, Clock, Target, RefreshCw, AlertCircle } from 'lucide-react';
+import Link from 'next/link';
+import { HelpCircle, Plus, Trash2, Clock, Target, RefreshCw, AlertCircle, ChevronRight } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 
 interface Quiz {
@@ -123,7 +124,7 @@ export function QuizSection({ quizzes, courseId, canManage }: Props) {
                   </div>
 
                   {/* Stats */}
-                  <div className="grid grid-cols-3 gap-2">
+                  <div className="grid grid-cols-3 gap-2 mb-4">
                     {[
                       { icon: Target,     label: 'გამსვლელი', value: `${quiz.passing_score}%` },
                       { icon: RefreshCw,  label: 'მცდელობა',  value: quiz.max_attempts ? `${quiz.max_attempts}x` : '∞' },
@@ -136,6 +137,15 @@ export function QuizSection({ quizzes, courseId, canManage }: Props) {
                       </div>
                     ))}
                   </div>
+
+                  {/* Manage questions link */}
+                  <Link
+                    href={`/dashboard/learning/courses/${courseId}/quizzes/${quiz.id}`}
+                    className="flex items-center justify-between w-full px-3 py-2 text-xs font-semibold text-violet-600 bg-violet-50 hover:bg-violet-100 border border-violet-200 rounded-xl transition-colors"
+                  >
+                    <span>{qCount > 0 ? `${qCount} კითხვა — მართვა` : 'კითხვების დამატება'}</span>
+                    <ChevronRight size={13} />
+                  </Link>
                 </div>
               </div>
             );
