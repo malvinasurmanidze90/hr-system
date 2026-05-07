@@ -1,12 +1,13 @@
 'use client';
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { createClient } from '@/lib/supabase/client';
+import { RichTextEditor } from '@/components/RichTextEditor';
 import {
   ChevronDown, ChevronRight, Plus, Pencil, Trash2,
   FileText, Video, File, HelpCircle, CheckSquare, ClipboardList,
   AlertCircle, Layers, BookOpen, ExternalLink, PlayCircle,
-  MoreVertical, SlidersHorizontal, Copy, History, Eye, EyeOff, CheckCircle2,
+  MoreVertical, SlidersHorizontal, Copy, History, Eye, EyeOff, CheckCircle2, Upload,
 } from 'lucide-react';
 
 /* ── Types ─────────────────────────────────────────────────────────── */
@@ -96,6 +97,23 @@ function PortalMenu({
   );
 }
 
+/* ── HTML / plain-text renderer (backward-compatible) ───────────────
+   Detects whether content is HTML (starts with a tag) or legacy plain
+   text and renders accordingly.
+   ─────────────────────────────────────────────────────────────────── */
+function isHtml(s: string) { return /^\s*</.test(s); }
+function LessonHtml({ content }: { content: string }) {
+  if (isHtml(content)) {
+    return (
+      <div
+        className="prose prose-sm max-w-none text-gray-700 leading-relaxed"
+        dangerouslySetInnerHTML={{ __html: content }}
+      />
+    );
+  }
+  return <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{content}</p>;
+}
+
 /* ── Component ─────────────────────────────────────────────────────── */
 export function ModuleBuilder({ initialModules, courseId, canManage }: Props) {
   const [modules, setModules]           = useState<CModule[]>(initialModules);
@@ -133,6 +151,42 @@ export function ModuleBuilder({ initialModules, courseId, canManage }: Props) {
 
   /* version history placeholder modal */
   const [historyModal, setHistoryModal] = useState(false);
+
+  /* file-to-text extraction for text lessons */
+  const fileInputRef   = useRef<HTMLInputElement>(null);
+  const [extracting, setExtracting]     = useState(false);
+  const [extractError, setExtractError] = useState('');
+
+  const handleFileExtract = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (fileInputRef.current) fileInputRef.current.value = '';
+
+    const ext = file.name.split('.').pop()?.toLowerCase() ?? '';
+    setExtracting(true);
+    setExtractError('');
+
+    try {
+      if (ext === 'txt' || ext === 'md') {
+        // plain text — no server round-trip needed
+        const text = await file.text();
+        setLesForm(p => ({ ...p, content: text }));
+      } else if (ext === 'docx' || ext === 'pdf') {
+        const fd = new FormData();
+        fd.append('file', file);
+        const res  = await fetch('/api/extract-text', { method: 'POST', body: fd });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error ?? 'Extraction failed');
+        setLesForm(p => ({ ...p, content: data.text }));
+      } else {
+        throw new Error('გამოიყენეთ .txt, .md, .docx ან .pdf');
+      }
+    } catch (err: any) {
+      setExtractError(err.message ?? 'შეცდომა');
+    } finally {
+      setExtracting(false);
+    }
+  };
 
   /* ── Reload ──────────────────────────────────────────────────────── */
   const reload = async () => {
@@ -220,6 +274,7 @@ export function ModuleBuilder({ initialModules, courseId, canManage }: Props) {
     if (lesModal.mode === 'add') {
       const mod = modules.find(m => m.id === lesModal.moduleId);
       const nextOrder = mod ? Math.max(...mod.course_lessons.map(l => l.sort_order ?? 0), -1) + 1 : 0;
+      const isControlQ = lesForm.completion_method === 'control_question';
       const { data: inserted, error: err } = await sb
         .from('course_lessons')
         .insert({
@@ -232,16 +287,24 @@ export function ModuleBuilder({ initialModules, courseId, canManage }: Props) {
           sort_order:        nextOrder,
           duration_minutes:  lesForm.duration_minutes,
           is_required:       lesForm.is_required,
-          completion_method: lesForm.completion_method,
-          control_question:  lesForm.completion_method === 'control_question' ? lesForm.control_question.trim() || null : null,
-          control_answer:    lesForm.completion_method === 'control_question' ? lesForm.control_answer.trim()   || null : null,
+          is_published:      true,
+          completion_method: isControlQ ? 'control_question' : 'button',
+          control_question:  isControlQ ? lesForm.control_question.trim() || null : null,
+          control_answer:    isControlQ ? lesForm.control_answer.trim()   || null : null,
         })
-        .select().single();
+        .select('id, module_id, title, lesson_type, content, video_url, file_url, sort_order, is_required, duration_minutes, is_published, completion_method, control_question, control_answer')
+        .single();
       setLoading(false);
       if (err) { setError(err.message); return; }
       const mid = lesModal.moduleId!;
       setLesModal({ open: false, mode: 'add' });
-      const newLesson = inserted as CLesson;
+      const newLesson: CLesson = {
+        ...(inserted as CLesson),
+        is_published:      true,
+        completion_method: isControlQ ? 'control_question' : 'button',
+        control_question:  isControlQ ? lesForm.control_question.trim() || null : null,
+        control_answer:    isControlQ ? lesForm.control_answer.trim()   || null : null,
+      };
       setModules(prev => prev.map(m => m.id === mid ? { ...m, course_lessons: [...m.course_lessons, newLesson] } : m));
       setExpanded(prev => new Set([...prev, mid]));
       setSelectedLesson(newLesson);
@@ -264,7 +327,20 @@ export function ModuleBuilder({ initialModules, courseId, canManage }: Props) {
         .eq('id', lesModal.lesson.id);
       setLoading(false);
       if (err) { setError(err.message); return; }
-      const updated: CLesson = { ...lesModal.lesson, ...lesForm, title: lesForm.title.trim() };
+      const isControlQ2 = lesForm.completion_method === 'control_question';
+      const updated: CLesson = {
+        ...lesModal.lesson,
+        title:             lesForm.title.trim(),
+        lesson_type:       lesForm.lesson_type,
+        content:           lesForm.content.trim() || null,
+        video_url:         lesForm.video_url.trim() || null,
+        file_url:          lesForm.file_url.trim() || null,
+        duration_minutes:  lesForm.duration_minutes,
+        is_required:       lesForm.is_required,
+        completion_method: isControlQ2 ? 'control_question' : 'button',
+        control_question:  isControlQ2 ? lesForm.control_question.trim() || null : null,
+        control_answer:    isControlQ2 ? lesForm.control_answer.trim()   || null : null,
+      };
       const mid = lesModal.moduleId!;
       setLesModal({ open: false, mode: 'add' });
       setModules(prev => prev.map(m =>
@@ -441,7 +517,7 @@ export function ModuleBuilder({ initialModules, courseId, canManage }: Props) {
         <div className="border-t border-gray-100 pt-5 space-y-5">
           {selectedLesson.lesson_type === 'text' && (
             selectedLesson.content?.trim() ? (
-              <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{selectedLesson.content}</p>
+              <LessonHtml content={selectedLesson.content} />
             ) : (
               <div className="flex items-center gap-2 p-4 bg-gray-50 rounded-xl text-sm text-gray-400">
                 <FileText size={15} className="flex-shrink-0" />ტექსტი არ არის — დაამატეთ „რედაქტირება"-ს გამოყენებით.
@@ -458,7 +534,7 @@ export function ModuleBuilder({ initialModules, courseId, canManage }: Props) {
                 </div>
               </div>
               {selectedLesson.content?.trim() && (
-                <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{selectedLesson.content}</p>
+                <LessonHtml content={selectedLesson.content} />
               )}
             </div>
           )}
@@ -934,11 +1010,38 @@ export function ModuleBuilder({ initialModules, courseId, canManage }: Props) {
               </div>
               {(lesForm.lesson_type === 'text' || lesForm.lesson_type === 'acknowledgement') && (
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1.5">კონტენტი</label>
-                  <textarea rows={5} value={lesForm.content}
-                    onChange={e => setLesForm(p => ({ ...p, content: e.target.value }))}
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="block text-sm font-medium text-gray-700">კონტენტი</label>
+                    {lesForm.lesson_type === 'text' && (
+                      <button
+                        type="button"
+                        disabled={extracting}
+                        onClick={() => fileInputRef.current?.click()}
+                        className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-indigo-600 border border-indigo-200 rounded-lg hover:bg-indigo-50 disabled:opacity-50 transition-colors"
+                      >
+                        {extracting ? <Spinner /> : <Upload size={11} />}
+                        {extracting ? 'იტვირთება...' : 'ფაილიდან (.txt .md .docx .pdf)'}
+                      </button>
+                    )}
+                  </div>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".txt,.md,.docx,.pdf"
+                    className="hidden"
+                    onChange={handleFileExtract}
+                  />
+                  {extractError && (
+                    <div className="flex items-center gap-2 text-xs text-red-600 bg-red-50 px-3 py-2 rounded-lg mb-2">
+                      <AlertCircle size={13} />{extractError}
+                    </div>
+                  )}
+                  <RichTextEditor
+                    value={lesForm.content}
+                    onChange={html => setLesForm(p => ({ ...p, content: html }))}
                     placeholder="გაკვეთილის ტექსტი..."
-                    className="w-full px-3.5 py-2.5 text-sm border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-none" />
+                    minHeight={200}
+                  />
                 </div>
               )}
               {lesForm.lesson_type === 'video' && (

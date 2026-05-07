@@ -19,7 +19,7 @@ interface Lesson {
   sort_order: number;
   is_required: boolean;
   duration_minutes: number;
-  completion_method?: 'button' | 'control_question';
+  completion_method?: string | null;
   control_question?: string | null;
   control_answer?: string | null;
 }
@@ -63,6 +63,24 @@ function youtubeEmbed(url: string): string | null {
   return null;
 }
 
+/* ── HTML / plain-text renderer (backward-compatible) ───────────────
+   If content starts with an HTML tag it was created with the rich-text
+   editor; render with dangerouslySetInnerHTML + prose styles.
+   Older plain-text content is rendered with whitespace-pre-wrap.
+   ─────────────────────────────────────────────────────────────────── */
+function isHtml(s: string) { return /^\s*</.test(s); }
+function LessonHtml({ content }: { content: string }) {
+  if (isHtml(content)) {
+    return (
+      <div
+        className="prose prose-sm max-w-none text-gray-700 leading-relaxed"
+        dangerouslySetInnerHTML={{ __html: content }}
+      />
+    );
+  }
+  return <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{content}</p>;
+}
+
 /* ── Spinner ─────────────────────────────────────────────────────────── */
 const Spinner = () => (
   <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
@@ -70,6 +88,15 @@ const Spinner = () => (
     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
   </svg>
 );
+
+/* ── Normalize completion method ─────────────────────────────────────
+   Any value other than 'control_question' (including null, undefined,
+   'manual', 'next_button', or any other legacy string) falls back to
+   'button'. This is the single source of truth for the whole player.
+   ─────────────────────────────────────────────────────────────────── */
+function resolveMethod(raw: string | null | undefined): 'button' | 'control_question' {
+  return raw === 'control_question' ? 'control_question' : 'button';
+}
 
 /* ── Component ──────────────────────────────────────────────────────── */
 export function LessonPlayer({
@@ -102,7 +129,29 @@ export function LessonPlayer({
   const isCompleted  = current ? completedIds.has(current.id) : false;
   const progress     = totalLessons > 0 ? Math.round((completedIds.size / totalLessons) * 100) : 0;
 
-  /* convenience: reset per-lesson transient state when navigating */
+  /* ── Derived completion state ───────────────────────────────────────
+     Computed once per render in parent scope so both the body and the
+     bottom bar see the same values.
+     ─────────────────────────────────────────────────────────────────── */
+  const completionMethod = resolveMethod(current?.completion_method);
+
+  // True when the lesson is in control-question mode AND both fields exist.
+  const useControlQ = completionMethod === 'control_question'
+    && !!current?.control_question?.trim()
+    && !!current?.control_answer?.trim();
+
+  // Acknowledgement lessons with button method need a checkbox check first.
+  const needsAck = isEnrolled
+    && !isCompleted
+    && completionMethod === 'button'
+    && current?.lesson_type === 'acknowledgement'
+    && !acknowledged;
+
+  // "Next →" is blocked when the lesson hasn't been completed through its
+  // required method: a pending control question OR an unchecked ack box.
+  const nextBlocked = isEnrolled && !isCompleted && (useControlQ || needsAck);
+
+  /* ── Navigation helper ──────────────────────────────────────────── */
   const navigate = (lesson: Lesson) => {
     setCurrent(lesson);
     setAcknowledged(false);
@@ -144,6 +193,7 @@ export function LessonPlayer({
     }
 
     setMarking(false);
+    // Auto-advance after marking complete.
     if (nextLesson) {
       setCurrent(nextLesson);
       setAcknowledged(false);
@@ -151,6 +201,21 @@ export function LessonPlayer({
       setControlError('');
     }
   }, [current, isEnrolled, marking, completedIds, totalLessons, enrollmentId, nextLesson, userId]);
+
+  /* ── "Next →" click handler ─────────────────────────────────────────
+     For button-type lessons that aren't yet complete, clicking Next
+     counts as the completion action (mark complete then advance).
+     For already-completed lessons or non-enrolled viewers, just navigate.
+     ─────────────────────────────────────────────────────────────────── */
+  const handleNext = useCallback(async () => {
+    if (!nextLesson || nextBlocked) return;
+    if (isEnrolled && !isCompleted && completionMethod === 'button') {
+      // markComplete navigates internally when nextLesson exists.
+      await markComplete();
+    } else {
+      navigate(nextLesson);
+    }
+  }, [nextLesson, nextBlocked, isEnrolled, isCompleted, completionMethod, markComplete]);
 
   /* ── Check control question answer ─────────────────────────────── */
   const checkControlAnswer = useCallback(async () => {
@@ -183,9 +248,6 @@ export function LessonPlayer({
 
     const conf = typeConf(current.lesson_type);
     const Icon = conf.icon;
-    const useControlQ = (current.completion_method ?? 'button') === 'control_question'
-      && !!current.control_question?.trim()
-      && !!current.control_answer?.trim();
 
     return (
       <div className="flex flex-col h-full">
@@ -208,9 +270,7 @@ export function LessonPlayer({
           {/* Text */}
           {current.lesson_type === 'text' && (
             current.content?.trim() ? (
-              <div className="prose prose-sm max-w-none text-gray-700 leading-relaxed whitespace-pre-wrap">
-                {current.content}
-              </div>
+              <LessonHtml content={current.content} />
             ) : (
               <div className="flex items-center gap-2 p-4 bg-gray-50 rounded-xl text-sm text-gray-400">
                 <FileText size={15} />კონტენტი ჯერ არ არის დამატებული.
@@ -277,11 +337,12 @@ export function LessonPlayer({
           {current.lesson_type === 'acknowledgement' && (
             <div className="space-y-4">
               {current.content?.trim() && (
-                <div className="p-5 bg-gray-50 rounded-xl border border-gray-200 text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">
-                  {current.content}
+                <div className="p-5 bg-gray-50 rounded-xl border border-gray-200">
+                  <LessonHtml content={current.content} />
                 </div>
               )}
-              {isEnrolled && !isCompleted && (current.completion_method ?? 'button') === 'button' && (
+              {/* Checkbox gate — only for button completion method */}
+              {isEnrolled && !isCompleted && completionMethod === 'button' && (
                 <label className={`flex items-start gap-3 p-4 rounded-xl border-2 cursor-pointer transition-all ${
                   acknowledged ? 'border-emerald-400 bg-emerald-50' : 'border-gray-300 bg-white hover:border-emerald-300'
                 }`}>
@@ -340,10 +401,11 @@ export function LessonPlayer({
             </div>
           )}
 
-          {/* ── Control question completion gate ───────────────────────
-               Shown when the lesson requires a correct answer to advance.
+          {/* ── Control question gate ────────────────────────────────────
+               Shown only when completion_method === 'control_question'
+               and both control_question and control_answer are filled.
                Sits inside the scrollable body so it's always reachable.
-               ─────────────────────────────────────────────────────── */}
+               ──────────────────────────────────────────────────────── */}
           {isEnrolled && !isCompleted && useControlQ && (
             <div className="rounded-2xl border-2 border-indigo-200 bg-indigo-50 p-5 space-y-3">
               {/* Question */}
@@ -391,10 +453,10 @@ export function LessonPlayer({
           )}
         </div>
 
-        {/* Bottom actions bar */}
+        {/* ── Bottom actions bar ───────────────────────────────────────── */}
         <div className="px-8 py-4 border-t border-gray-100 bg-gray-50/80 flex items-center gap-3 flex-shrink-0">
 
-          {/* Prev */}
+          {/* Prev ← */}
           <button
             onClick={() => { if (prevLesson) navigate(prevLesson); }}
             disabled={!prevLesson}
@@ -403,37 +465,41 @@ export function LessonPlayer({
             <ChevronLeft size={15} />წინა
           </button>
 
-          {/* Center: mark complete OR control-question hint */}
-          {isEnrolled && (
-            <div className="flex-1 flex justify-center">
-              {isCompleted ? (
-                <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-emerald-600">
-                  <CheckCircle2 size={16} />დასრულებული
-                </span>
-              ) : useControlQ ? (
-                /* hint — actual completion gate is the question block above */
-                <span className="text-xs text-indigo-400 flex items-center gap-1">
-                  <HelpCircle size={12} />უპასუხეთ კითხვას დასასრულებლად
-                </span>
-              ) : (
-                <button
-                  onClick={
-                    current.lesson_type === 'acknowledgement' && !acknowledged ? undefined : markComplete
-                  }
-                  disabled={marking || (current.lesson_type === 'acknowledgement' && !acknowledged)}
-                  className="flex items-center gap-2 px-5 py-2 text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-sm"
-                >
-                  {marking ? <Spinner /> : <CheckCircle2 size={15} />}
-                  {marking ? 'ინახება...' : 'დასრულებულია'}
-                </button>
-              )}
-            </div>
-          )}
+          {/* Center status / last-lesson completion */}
+          <div className="flex-1 flex justify-center">
+            {isCompleted ? (
+              /* Already done */
+              <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-emerald-600">
+                <CheckCircle2 size={16} />დასრულებული
+              </span>
+            ) : useControlQ ? (
+              /* control_question: the gate is the block above, show hint here */
+              <span className="text-xs text-indigo-400 flex items-center gap-1">
+                <HelpCircle size={12} />უპასუხეთ კითხვას დასასრულებლად
+              </span>
+            ) : isEnrolled && !nextLesson ? (
+              /* button method on the last lesson — no Next → to click */
+              <button
+                onClick={markComplete}
+                disabled={marking || needsAck}
+                className="flex items-center gap-2 px-5 py-2 text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-sm"
+              >
+                {marking ? <Spinner /> : <CheckCircle2 size={15} />}
+                {marking ? 'ინახება...' : 'დასრულებულია'}
+              </button>
+            ) : null}
+          </div>
 
-          {/* Next */}
+          {/* Next →
+               • Disabled when nextBlocked (control question not answered,
+                 or acknowledgement checkbox not checked).
+               • For button-type enrolled lessons: clicking marks complete
+                 then auto-advances (markComplete handles navigation).
+               • For completed / non-enrolled: just navigate.
+          */}
           <button
-            onClick={() => { if (nextLesson) navigate(nextLesson); }}
-            disabled={!nextLesson}
+            onClick={handleNext}
+            disabled={!nextLesson || nextBlocked}
             className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 border border-indigo-600 rounded-xl disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           >
             შემდეგი<ChevronRightNav size={15} />
@@ -503,7 +569,8 @@ export function LessonPlayer({
                   const isCurr = current?.id === lesson.id;
                   const conf   = typeConf(lesson.lesson_type);
                   const Icon   = conf.icon;
-                  const hasQ   = (lesson.completion_method ?? 'button') === 'control_question'
+                  // Show ? badge only for control_question lessons with both fields set.
+                  const hasQ   = resolveMethod(lesson.completion_method) === 'control_question'
                     && !!lesson.control_question?.trim();
                   return (
                     <button
